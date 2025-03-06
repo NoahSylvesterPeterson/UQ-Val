@@ -2,7 +2,8 @@
 #
 import numpy as np
 
-def likelihood(q,C,p):
+
+def likelihood(q, C, p):
     """
     This routine should return the log of the
     likelihood function: P(qi|q,C,p,X)
