@@ -2,7 +2,7 @@
 from matplotlib.ticker import FormatStrFormatter
 from multiprocessing import Pool
 from math import ceil, floor
-from emcee import EnsembleSampler
+from emcee import EnsembleSampler, autocorr
 import likelihood
 import prior
 from scipy import stats
@@ -10,6 +10,7 @@ from matplotlib import pyplot as plt
 import numpy as np
 from cmcrameri import cm
 import os
+import corner
 
 os.environ["OMP_NUM_THREADS"] = "1"
 
@@ -116,7 +117,6 @@ def main():
     #
     # initialize the Bayesian Calibration Procedure
     #
-    bre = BayesianRichardsonExtrapolation()
 
     print("\nInitializing walkers")
     nwalk = 100
@@ -127,18 +127,44 @@ def main():
     guess_p = 6
 
     params0 = np.tile([guess_q, guess_c, guess_p], nwalk).reshape(nwalk, 3)
-    params0.T[0] += np.random.randn(nwalk) * 0.025    # Perturb q
-    params0.T[1] += np.random.randn(nwalk) * 0.1      # Perturb C
-    params0.T[2] += np.random.randn(nwalk) * 1.5      # Perturb p...
-    params0.T[2] = np.absolute(params0.T[2])        # ...and force >= 0
+    params0[:, 0] += np.random.randn(nwalk) * 0.025    # Perturb q
+    params0[:, 1] += np.random.randn(nwalk) * 0.1      # Perturb C
+    params0[:, 2] += np.random.randn(nwalk) * 1.5      # Perturb p...
+    params0[:, 2] = np.absolute(params0[:, 2])        # ...and force >= 0
 
     print("\nInitializing the sampler and burning in walkers")
     with Pool(10) as pool:
+        bre = BayesianRichardsonExtrapolation()
         s = EnsembleSampler(nwalk, params0.shape[-1], bre, pool=pool)
-        pos, prob, state = s.run_mcmc(params0, 5000, progress=True)
+        pos, prob, state = s.run_mcmc(params0, 15000, progress=True)
+        # tau = s.get_autocorr_time()
+        # print(tau)
         s.reset()
+        finished = False
+        step = 0
+        step_size = 5000
         print("\nSampling the posterior density for the problem")
-        s.run_mcmc(pos, 100000, progress=True)
+        while not finished:
+            # Use autocorrelation time to determine if we have converged
+            # adapted from https://groups.google.com/g/emcee-users/c/KuoXbQTH_8Q
+            pos, _, _ = s.run_mcmc(pos, step_size, progress=True)
+            step += step_size
+            try:
+                tau = s.get_autocorr_time()
+
+                print(f"step {step}  progress {step/(tau*50)}")
+
+                if not np.any(np.isnan(tau)):
+                    finished = True
+
+            except autocorr.AutocorrError as err:
+                tau = err.tau
+
+                print(f"step {step}  progress {step/(tau*50)}")
+
+        # final sampling
+        s.run_mcmc(pos, 10000, progress=True)
+        print(f'{tau=}')
 
         print("Mean acceptance fraction was %.3f" % s.acceptance_fraction.mean())
 
@@ -146,7 +172,9 @@ def main():
         # 1d Marginals
         #
         print("\nDetails for posterior one-dimensional marginals:")
-        flat_samples = s.get_chain(discard=150, thin=10, flat=True)
+        # Remove a sufficient number of burn-in steps
+        burn = int(np.ceil(np.max(tau)) * 2)
+        flat_samples = s.get_chain(discard=burn, flat=True)
 
         qm, qs = textual_boxplot("q", flat_samples[:, 0], header=True)
         cm, cs = textual_boxplot("C", flat_samples[:, 1], header=False)
@@ -164,7 +192,12 @@ def main():
         # ----------------------------------
         # FIGURE: Joint posterior(s)
         # ----------------------------------
-        _, axes = plt.subplots(3, 3, figsize=(6, 6))
+        fig = corner.corner(
+            flat_samples, labels=[
+                "$q$", "$C$", "$p$"], quantiles=[0.025, 0.5, 0.975], show_titles=True, title_fmt=".3g", title_kwargs={"fontsize": 12})
+        plt.savefig('joint_post_corner.pdf', bbox_inches='tight')
+
+        fig, axes = plt.subplots(3, 3, figsize=(6, 6))
 
         qbins = np.linspace(np.min(flat_samples[:, 0]), np.max(flat_samples[:, 0]), 200)
         Cbins = np.linspace(np.min(flat_samples[:, 1]), np.max(flat_samples[:, 1]), 200)
@@ -187,8 +220,8 @@ def main():
         Cticks = np.linspace(Cbounds[0], Cbounds[1], 3)
         pticks = np.linspace(pbounds[0], pbounds[1], 5)
 
-        formatter = FormatStrFormatter('%5.4f')
-        formatter2 = FormatStrFormatter('%5.f')
+        formatter = FormatStrFormatter('%0.4g')
+        formatter2 = FormatStrFormatter('%2.f')
 
         axes[1, 0].axis('off')
         axes[2, 0].axis('off')
