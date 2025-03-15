@@ -2,7 +2,6 @@
 #!/usr/bin/env python
 #
 import numpy as np
-from scipy.stats import norm, uniform
 from scipy.special import erfinv
 
 U_MEAN = 1.16389876649
@@ -18,8 +17,7 @@ def prior_U(q):
     prior probability distribution: P(q|X)
     evaluated for the given value of q.
     """
-
-    return norm.logpdf(q, loc=U_MEAN, scale=U_STD)
+    return -0.5 * (np.log(2 * np.pi * U_STD**2) + (q - U_MEAN)**2 / (U_STD**2))
 
 
 def prior_C(C):
@@ -28,7 +26,7 @@ def prior_C(C):
     prior probability distribution: P(C|X)
     evaluated for the given value of C.
     """
-    return norm.logpdf(C, loc=0, scale=C_STD)
+    return -0.5 * (np.log(2 * np.pi * C_STD**2) + C**2 / (C_STD**2))
 
 
 def prior_p(p):
@@ -37,7 +35,10 @@ def prior_p(p):
     prior probability distribution: P(p|X)
     evaluated for the given value of p.
     """
-    return uniform.logpdf(p, loc=1, scale=9)
+    if p < 1 or p > 10:
+        return -np.inf
+    return -np.log(9)
+    # return uniform.logpdf(p, loc=1, scale=9)
 #
 # One should not have to edit the routine below
 #
