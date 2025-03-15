@@ -7,8 +7,9 @@ from scipy.special import erfinv
 
 U_MEAN = 1.16389876649
 ERFINV_95 = erfinv(0.95)
-U_STD = (0.1 * U_MEAN / (2 * np.sqrt(2) * ERFINV_95))**2
-C_STD = (0.01 * U_MEAN / (2 * np.sqrt(2) * ERFINV_95))**2
+U_STD = (0.1 * U_MEAN / (2 * np.sqrt(2) * ERFINV_95))
+C_STD = (0.01 * U_MEAN / (2 * np.sqrt(2) * ERFINV_95))
+LOG_SQRT_2PI = np.log(np.sqrt(2 * np.pi))
 
 
 def prior_U(q):

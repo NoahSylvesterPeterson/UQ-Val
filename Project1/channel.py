@@ -6,10 +6,12 @@ from emcee import EnsembleSampler
 import likelihood
 import prior
 from scipy import stats
-import pylab
 from matplotlib import pyplot as plt
 import numpy as np
 from cmcrameri import cm
+import os
+
+os.environ["OMP_NUM_THREADS"] = "1"
 
 plt.rcParams["text.usetex"] = True
 plt.rcParams["font.family"] = "serif"
@@ -125,18 +127,18 @@ def main():
     guess_p = 6
 
     params0 = np.tile([guess_q, guess_c, guess_p], nwalk).reshape(nwalk, 3)
-    params0.T[0] += np.random.rand(nwalk) * 0.025    # Perturb q
-    params0.T[1] += np.random.rand(nwalk) * 0.1      # Perturb C
-    params0.T[2] += np.random.rand(nwalk) * 1.5      # Perturb p...
+    params0.T[0] += np.random.randn(nwalk) * 0.025    # Perturb q
+    params0.T[1] += np.random.randn(nwalk) * 0.1      # Perturb C
+    params0.T[2] += np.random.randn(nwalk) * 1.5      # Perturb p...
     params0.T[2] = np.absolute(params0.T[2])        # ...and force >= 0
 
     print("\nInitializing the sampler and burning in walkers")
-    with Pool(8) as pool:
+    with Pool(10) as pool:
         s = EnsembleSampler(nwalk, params0.shape[-1], bre, pool=pool)
         pos, prob, state = s.run_mcmc(params0, 5000, progress=True)
         s.reset()
         print("\nSampling the posterior density for the problem")
-        s.run_mcmc(pos, 10000, progress=True)
+        s.run_mcmc(pos, 100000, progress=True)
 
         print("Mean acceptance fraction was %.3f" % s.acceptance_fraction.mean())
 
@@ -144,31 +146,33 @@ def main():
         # 1d Marginals
         #
         print("\nDetails for posterior one-dimensional marginals:")
+        flat_samples = s.get_chain(discard=150, thin=10, flat=True)
 
-        qm, qs = textual_boxplot("q", s.flatchain[:, 0], header=True)
-        cm, cs = textual_boxplot("C", s.flatchain[:, 1], header=False)
-        pm, ps = textual_boxplot("p", s.flatchain[:, 2], header=False)
+        qm, qs = textual_boxplot("q", flat_samples[:, 0], header=True)
+        cm, cs = textual_boxplot("C", flat_samples[:, 1], header=False)
+        pm, ps = textual_boxplot("p", flat_samples[:, 2], header=False)
 
         # ----------------------------------
         # FIGURES: Marginal posterior(s)
         # ----------------------------------
         print("\nPrinting PDF output")
 
-        plotter(s.flatchain[:, 0], 'U')
-        plotter(s.flatchain[:, 1], 'C')
-        plotter(s.flatchain[:, 2], 'p')
+        plotter(flat_samples[:, 0], 'U')
+        plotter(flat_samples[:, 1], 'C')
+        plotter(flat_samples[:, 2], 'p')
 
         # ----------------------------------
         # FIGURE: Joint posterior(s)
         # ----------------------------------
+        _, axes = plt.subplots(3, 3, figsize=(6, 6))
 
-        qbins = np.linspace(np.min(s.flatchain[:, 0]), np.max(s.flatchain[:, 0]), 200)
-        Cbins = np.linspace(np.min(s.flatchain[:, 1]), np.max(s.flatchain[:, 1]), 200)
-        pbins = np.linspace(np.min(s.flatchain[:, 2]), np.max(s.flatchain[:, 2]), 200)
+        qbins = np.linspace(np.min(flat_samples[:, 0]), np.max(flat_samples[:, 0]), 200)
+        Cbins = np.linspace(np.min(flat_samples[:, 1]), np.max(flat_samples[:, 1]), 200)
+        pbins = np.linspace(np.min(flat_samples[:, 2]), np.max(flat_samples[:, 2]), 200)
 
-        qkde = stats.gaussian_kde(s.flatchain[:, 0])
-        Ckde = stats.gaussian_kde(s.flatchain[:, 1])
-        pkde = stats.gaussian_kde(s.flatchain[:, 2])
+        qkde = stats.gaussian_kde(flat_samples[:, 0])
+        Ckde = stats.gaussian_kde(flat_samples[:, 1])
+        pkde = stats.gaussian_kde(flat_samples[:, 2])
 
         qpdf = qkde.evaluate(qbins)
         Cpdf = Ckde.evaluate(Cbins)
@@ -183,88 +187,84 @@ def main():
         Cticks = np.linspace(Cbounds[0], Cbounds[1], 3)
         pticks = np.linspace(pbounds[0], pbounds[1], 5)
 
-        plt.figure()
-
         formatter = FormatStrFormatter('%5.4f')
         formatter2 = FormatStrFormatter('%5.f')
 
-        pylab.subplot(3, 3, 1)
-        plt.plot(qbins, qpdf, linewidth=2, color="k", label="Post")
+        axes[1, 0].axis('off')
+        axes[2, 0].axis('off')
+        axes[2, 1].axis('off')
 
-        plt.xlim(qbounds)
-        pylab.gca().set_xticks(qticks)
-        pylab.gca().xaxis.set_major_formatter(formatter)
-        pylab.gca().xaxis.set_minor_formatter(formatter)
-        pylab.gca().set_yticks([])
-        plt.xlabel('$q$', fontsize=24)
+        axes[0, 0].plot(qbins, qpdf, linewidth=2, color="k", label="Post")
 
-        pylab.subplot(3, 3, 2)
-        H, qe, Ce = np.histogram2d(s.flatchain[:, 0], s.flatchain[:, 1], bins=(200, 200))
+        axes[0, 0].set_xlim(qbounds)
+        axes[0, 0].set_xticks(qticks)
+        axes[0, 0].xaxis.set_major_formatter(formatter)
+        axes[0, 0].xaxis.set_minor_formatter(formatter)
+        axes[0, 0].set_yticks([])
+        axes[0, 0].set_xlabel('$q$', fontsize=24)
+
+        H, qe, Ce = np.histogram2d(flat_samples[:, 0], flat_samples[:, 1], bins=(200, 200))
 
         qv = 0.5 * (qe[0:-1] + qe[1:len(qe)])
         Cv = 0.5 * (Ce[0:-1] + Ce[1:len(Ce)])
 
-        plt.contour(Cv, qv, H, 5, colors='k')
+        axes[0, 1].contour(Cv, qv, H, 5, colors='k')
 
-        plt.xlim(Cbounds)
-        pylab.gca().set_xticks(Cticks)
-        pylab.gca().set_xticklabels([])
+        axes[0, 1].set_xlim(Cbounds)
+        axes[0, 1].set_xticks(Cticks)
+        axes[0, 1].set_xticklabels([])
 
         # plt.ylim(qbounds)
-        pylab.gca().set_yticks(qticks)
-        pylab.gca().set_yticklabels([])
+        axes[0, 1].set_yticks(qticks)
+        axes[0, 1].set_yticklabels([])
 
-        pylab.subplot(3, 3, 3)
-        H, qe, pe = np.histogram2d(s.flatchain[:, 0], s.flatchain[:, 2], bins=(200, 200))
+        H, qe, pe = np.histogram2d(flat_samples[:, 0], flat_samples[:, 2], bins=(200, 200))
 
         qv = 0.5 * (qe[0:-1] + qe[1:len(qe)])
         pv = 0.5 * (pe[0:-1] + pe[1:len(pe)])
 
-        plt.contour(pv, qv, H, 5, colors='k')
+        axes[0, 2].contour(pv, qv, H, 5, colors='k')
 
-        plt.xlim(pbounds)
-        pylab.gca().set_xticks(pticks)
-        pylab.gca().set_xticklabels([])
+        axes[0, 2].set_xlim(pbounds)
+        axes[0, 2].set_xticks(pticks)
+        axes[0, 2].set_xticklabels([])
 
-        plt.ylim(qbounds)
-        pylab.gca().set_yticks(qticks)
-        pylab.gca().set_yticklabels([])
+        axes[0, 2].set_ylim(qbounds)
+        axes[0, 2].set_yticks(qticks)
+        axes[0, 2].set_yticklabels([])
 
-        pylab.subplot(3, 3, 5)
-        plt.plot(Cbins, Cpdf, linewidth=2, color="k", label="Post")
-        pylab.gca().xaxis.set_major_formatter(formatter)
-        pylab.gca().xaxis.set_minor_formatter(formatter)
-        pylab.gca().set_yticks([])
-        plt.xlabel('$C$', fontsize=24)
+        axes[1, 1].plot(Cbins, Cpdf, linewidth=2, color="k", label="Post")
+        axes[1, 1].xaxis.set_major_formatter(formatter)
+        axes[1, 1].xaxis.set_minor_formatter(formatter)
+        axes[1, 1].set_yticks([])
+        axes[1, 1].set_xlabel('$C$', fontsize=24)
 
-        plt.xlim(Cbounds)
-        pylab.gca().set_xticks(Cticks)
+        axes[1, 1].set_xlim(Cbounds)
+        axes[1, 1].set_xticks(Cticks)
 
-        pylab.subplot(3, 3, 6)
-        H, Ce, pe = np.histogram2d(s.flatchain[:, 1], s.flatchain[:, 2], bins=(200, 200))
+        H, Ce, pe = np.histogram2d(flat_samples[:, 1], flat_samples[:, 2], bins=(200, 200))
 
         Cv = 0.5 * (Ce[0:-1] + Ce[1:len(Ce)])
         pv = 0.5 * (pe[0:-1] + pe[1:len(pe)])
 
-        plt.contour(pv, Cv, H, 5, colors='k')
+        axes[1, 2].contour(pv, Cv, H, 5, colors='k')
 
-        plt.xlim(pbounds)
-        pylab.gca().set_xticks(pticks)
-        pylab.gca().set_xticklabels([])
+        axes[1, 2].set_xlim(pbounds)
+        axes[1, 2].set_xticks(pticks)
+        axes[1, 2].set_xticklabels([])
 
-        plt.ylim(Cbounds)
-        pylab.gca().set_yticks(Cticks)
-        pylab.gca().set_yticklabels([])
+        axes[1, 2].set_ylim(Cbounds)
+        axes[1, 2].set_yticks(Cticks)
+        axes[1, 2].set_yticklabels([])
 
-        pylab.subplot(3, 3, 9)
-        plt.plot(pbins, ppdf, linewidth=2, color="k", label="Post")
-        pylab.gca().xaxis.set_major_formatter(formatter2)
-        pylab.gca().xaxis.set_minor_formatter(formatter2)
-        pylab.gca().set_yticks([])
-        plt.xlabel('$p$', fontsize=24)
+        axes[2, 2].plot(pbins, ppdf, linewidth=2, color="k", label="Post")
+        axes[2, 2].xaxis.set_major_formatter(formatter2)
+        axes[2, 2].xaxis.set_minor_formatter(formatter2)
+        axes[2, 2].set_yticks([])
+        axes[2, 2].set_xlabel('$p$', fontsize=24)
 
-        plt.xlim(pbounds)
-        pylab.gca().set_xticks(pticks)
+        axes[2, 2].set_xlim(pbounds)
+        axes[2, 2].set_xticks(pticks)
         plt.savefig('joint_post.pdf', bbox_inches='tight')
 
 
