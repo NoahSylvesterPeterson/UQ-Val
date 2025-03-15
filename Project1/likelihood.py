@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-#
 import numpy as np
 
 data = [
@@ -12,16 +10,12 @@ data = [
 
 def likelihood(q, C, p):
     """
-    This routine should return the log of the
-    likelihood function: P(qi|q,C,p,X)
-    evaluated for given values of q, C and p
+    Returns the log of the likelihood function P(qi|q,C,p,X) evaluated for given values of q, C and p
     """
-
     likelihood_sum = 0
-
     for data_point in data:
         h, q_i, sigma_i = data_point
         # Calculate the likelihood
-        likelihood_sum += -0.5 * (np.log(2 * np.pi * sigma_i**2) + (q_i - (q - C * np.power(h, p)))**2 / sigma_i**2)
-
+        likelihood_sum += -0.5 * np.log(2 * np.pi * sigma_i**2)
+        likelihood_sum += -0.5 * (q_i - (q - C * np.power(h, p)))**2 / sigma_i**2
     return likelihood_sum
