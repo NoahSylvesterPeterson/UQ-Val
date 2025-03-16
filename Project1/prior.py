@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.special import erfinv
 
-U_MEAN = 1.16389876649
+U_MEAN = 1.1627
 ERFINV_95 = erfinv(0.95)
 U_STD = (0.1 * U_MEAN / (2 * np.sqrt(2) * ERFINV_95))
 C_STD = (0.01 * U_MEAN / (2 * np.sqrt(2) * ERFINV_95))
