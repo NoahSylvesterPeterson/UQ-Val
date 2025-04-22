@@ -1,6 +1,6 @@
 # --------------------------------------------------------------------
 # USE OF NOAA GML DATA
-# 
+#
 # These data are made freely available to the public and the scientific
 # community in the belief that their wide dissemination will lead to
 # greater understanding and new scientific insights. To ensure that GML
@@ -9,19 +9,19 @@
 # who can provide detailed information about the measurements and
 # scientific insight.  In cases where the data are central to a
 # publication, coauthorship for data providers may be appropriate.
-# 
-# 
-# 
+#
+#
+#
 # Contact:  Xin Lan (xin.lan@noaa.gov)
-# 
+#
 # File Creation: Mon Apr 14 08:21:42 2025
-# 
-# 
+#
+#
 # --------------------------------------------------------------------
-# 
-# 
+#
+#
 # See gml.noaa.gov/ccgg/trends/ for additional details.
-# 
+#
 # Data from March 1958 through April 1974 have been obtained by C. David Keeling
 # of the Scripps Institution of Oceanography (SIO) and were obtained from the
 # Scripps website (scrippsco2.ucsd.edu).
@@ -38,11 +38,11 @@
 # CO2 expressed as a mole fraction in dry air, micromol/mol, abbreviated as ppm
 #
 # NOTE: Due to the eruption of the Mauna Loa Volcano, measurements from Mauna Loa Observatory
-# were suspended as of Nov. 29, 2022 and resumed in July 2023. 
-# Observations starting from December 2022 to July 4, 2023 are from a site at the 
+# were suspended as of Nov. 29, 2022 and resumed in July 2023.
+# Observations starting from December 2022 to July 4, 2023 are from a site at the
 # Maunakea Observatories, approximately 21 miles north of the Mauna Loa Observatory.
-# 
-# year,  mean,unc
+#
+  year,  mean,  unc
   1959,315.98,  0.12
   1960,316.91,  0.12
   1961,317.64,  0.12

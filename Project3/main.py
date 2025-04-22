@@ -5,12 +5,16 @@ from math import ceil, floor
 from emcee import EnsembleSampler, autocorr
 import likelihood
 import prior
-from scipy import stats
+from scipy import stats, optimize
 from matplotlib import pyplot as plt
 import numpy as np
 from cmcrameri import cm
 import os
 import corner
+import pandas as pd
+from rich import print
+from rich.traceback import install
+install(show_locals=True)
 
 os.environ["OMP_NUM_THREADS"] = "1"
 
@@ -34,6 +38,40 @@ plt.rcParams["font.size"] = 12
 
 # construct map of prior functions, to plot below
 fdict = {'prior_alpha': prior.prior_alpha, 'prior_f0': prior.prior_f0, 'prior_f1': prior.prior_f1}
+
+
+def ReadSiple2():
+    # pd.read_csv("siple_1", usecols=(3, 4), names=["year", "CO2"])
+    data_old = pd.read_csv("data/siple_2.csv", usecols=(1, 2), header=0, names=["year", "CO2"])
+    return (data_old)
+
+
+def read_atmospheric_CO2_data():
+    data_new = pd.read_csv("data/Maunoa_Lao_atmospheric_CO2_levels_1956-2024.csv",
+                           skiprows=44, usecols=(0, 1), header=0, names=["year", "CO2"])
+    data_old = ReadSiple2()
+    data = pd.concat([data_old, data_new], ignore_index=True)
+    return data
+
+
+def read_temperature_data():
+    """Reads the temperature data from the file and returns it as a numpy array."""
+    data: pd.DataFrame = pd.read_csv("data/globalTemperatureAnomoly1900-2024.csv",
+                                     skiprows=4, usecols=(0, 1), header=0, names=["year", "anomaly"])
+    data["temperature"] = data["anomaly"] + 286.9
+
+    return data[["year", "temperature"]]
+
+
+def read_data():
+    temp_data = read_temperature_data()
+    co2_data = read_atmospheric_CO2_data()
+    temp_data["year"] = pd.to_datetime(temp_data["year"], format="%Y")
+    co2_data["year"] = pd.to_datetime(co2_data["year"], format="%Y")
+    temp_data.set_index("year", inplace=True)
+    co2_data.set_index("year", inplace=True)
+    data = pd.merge(co2_data, temp_data, left_index=True, right_index=True)
+    return data
 
 
 def plotter(chain, quant, xmin=None, xmax=None):
@@ -174,11 +212,48 @@ def main():
         plt.savefig('joint_post_corner.pdf', bbox_inches='tight')
 
 
+def vis_data():
+    data = read_data()
+    plt.plot(data)
+    plt.savefig('./tmp.png')
+
+
 def problem1a(alpha, f):
-    print(f"Problem 1: For {alpha=}, {f=}, predicted T={likelihood.model_T_simple(alpha, f)}")
+    print(f"[bold]Problem 1a: For {alpha=}, {f=}, predicted T={likelihood.model_T_simple(alpha, f)}")
 
 
-# Stop module loading when imported.  Otherwise continue running.
+def lsqr_fn(x, data):
+    """Least squares function to minimize."""
+    alpha, f0, f1 = x
+    model = likelihood.model_T(alpha, f0, f1, data["CO2"])
+    return data["temperature"] - model
+
+
+def problem1b():
+    print("\n[bold]Problem 1b: Least squares optimization")
+    data = read_data()
+    init = (0, 0, 0)
+    res: optimize.OptimizeResult = optimize.least_squares(
+        lambda p: lsqr_fn(p, data),
+        init,
+        bounds=([0, 0, -np.inf], [1, 1, np.inf]),
+    )
+    if res.success:
+        print("\tOptimization was successful.")
+    else:
+        print("\tOptimization failed.")
+    alpha, f0, f1 = res.x
+    print(f"\tParameters: {alpha=}, {f0=}, {f1=}")
+    print(f"\tCost function value:", res.cost)
+    print(f"\tMSQR:", np.linalg.norm(res.fun) / len(data["temperature"]))
+    f = likelihood.embedded_f_linear(f0, f1, data["CO2"])
+    if np.any(f < 0) or np.any(f > 1):
+        print(f"\t[yellow]Warning: {len(f[f > 1]) + len(f[f<0])} f values are out of bounds!")
+
+
 if __name__ == '__main__':
     problem1a(0.3, 0.6)
-    # main()
+    problem1b()
+    pd.set_option('display.max_rows', None)
+    # print(read_data().head(81))
+    vis_data()
