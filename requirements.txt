@@ -1,0 +1,6 @@
+emcee
+scipy
+cmcrameri
+numpy
+matplotlib
+corner
