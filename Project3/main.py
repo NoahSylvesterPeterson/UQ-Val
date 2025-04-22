@@ -33,14 +33,11 @@ plt.rcParams["font.size"] = 12
 # local files that will be imported
 
 # construct map of prior functions, to plot below
-fdict = {'prior_p': prior.prior_p, 'prior_U': prior.prior_U, 'prior_C': prior.prior_C}
-
-# -------------------------------------------------------------
-# subroutine that generates a .pdf file plotting a quantity
-# -------------------------------------------------------------
+fdict = {'prior_alpha': prior.prior_alpha, 'prior_f0': prior.prior_f0, 'prior_f1': prior.prior_f1}
 
 
 def plotter(chain, quant, xmin=None, xmax=None):
+    """subroutine that generates a .pdf file plotting a quantity"""
     bins = np.linspace(np.min(chain), np.max(chain), 200)
     qkde = stats.gaussian_kde(chain)
     qpdf = qkde.evaluate(bins)
@@ -74,19 +71,13 @@ def plotter(chain, quant, xmin=None, xmax=None):
     plt.savefig(quant + '_post.pdf', bbox_inches='tight')
 
 
-# -------------------------------------------------------------
-# MCMC sampling Function
-# -------------------------------------------------------------
-
 class BayesianRichardsonExtrapolation():
-    "Computes the Bayesian Richardson extrapolation posterior log density."
+    """Computes the Bayesian Richardson extrapolation posterior log density."""
 
     def __call__(self, params, dtype=np.double):
-        q, C, p = params
-
         return (
-            prior.prior(q, C, p) +
-            likelihood.likelihood(q, C, p)
+            prior.prior(*params) +
+            likelihood.likelihood(*params)
         )
 
 
@@ -109,36 +100,26 @@ def textual_boxplot(label, unordered, header):
 
 
 def main():
-    # -------------------------------------------------------------
-    # Main Function
-    # -------------------------------------------------------------
-    # Example of sampling Bayesian Richardson extrapolation density using emcee
-
-    #
     # initialize the Bayesian Calibration Procedure
-    #
-
     print("\nInitializing walkers")
     nwalk = 100
 
     # initial guesses for the walkers starting locations
-    guess_q = 1.16389876649
-    guess_c = 0
-    guess_p = 6
+    guess_alpha = 0.5
+    guess_f0 = 0.5
+    guess_f1 = 0.5
 
-    params0 = np.tile([guess_q, guess_c, guess_p], nwalk).reshape(nwalk, 3)
-    params0[:, 0] += np.random.randn(nwalk) * 0.025    # Perturb q
-    params0[:, 1] += np.random.randn(nwalk) * 0.1      # Perturb C
-    params0[:, 2] += np.random.randn(nwalk) * 1.5      # Perturb p...
-    params0[:, 2] = np.absolute(params0[:, 2])        # ...and force >= 0
+    params0 = np.tile([guess_alpha, guess_f0, guess_f1], nwalk).reshape(nwalk, 3)
+    params0[:, 0] += np.random.randn(nwalk) * 0.5    # Perturb alpha
+    params0[:, 1] += np.random.randn(nwalk) * 0.5    # Perturb f0
+    params0[:, 2] += np.random.randn(nwalk) * 0.5    # Perturb f1
+    params0 = np.clip(params0, 0, 1)
 
     print("\nInitializing the sampler and burning in walkers")
     with Pool(10) as pool:
-        bre = BayesianRichardsonExtrapolation()
-        s = EnsembleSampler(nwalk, params0.shape[-1], bre, pool=pool)
+        sampler = BayesianRichardsonExtrapolation()
+        s = EnsembleSampler(nwalk, params0.shape[-1], sampler, pool=pool)
         pos, prob, state = s.run_mcmc(params0, 15000, progress=True)
-        # tau = s.get_autocorr_time()
-        # print(tau)
         s.reset()
         finished = False
         step = 0
@@ -168,32 +149,36 @@ def main():
 
         print("Mean acceptance fraction was %.3f" % s.acceptance_fraction.mean())
 
-        #
         # 1d Marginals
-        #
         print("\nDetails for posterior one-dimensional marginals:")
         # Remove a sufficient number of burn-in steps
         burn = int(np.ceil(np.max(tau)) * 2)
         flat_samples = s.get_chain(discard=burn, flat=True)
 
-        # ----------------------------------
         # FIGURES: Marginal posterior(s)
-        # ----------------------------------
         print("\nPrinting PDF output")
 
-        plotter(flat_samples[:, 0], 'U')
-        plotter(flat_samples[:, 1], 'C')
-        plotter(flat_samples[:, 2], 'p')
+        plotter(flat_samples[:, 0], 'alpha')
+        plotter(flat_samples[:, 1], 'f0')
+        plotter(flat_samples[:, 2], 'f1')
 
-        # ----------------------------------
         # FIGURE: Joint posterior(s)
-        # ----------------------------------
-        fig = corner.corner(
-            flat_samples, labels=[
-                "$q$", "$C$", "$p$"], quantiles=[0.025, 0.5, 0.975], show_titles=True, title_fmt=".3g", title_kwargs={"fontsize": 12})
+        corner.corner(
+            flat_samples,
+            labels=[r"$\alpha$", r"$f_0$", r"$f_1$"],
+            quantiles=[0.025, 0.5, 0.975],
+            show_titles=True,
+            title_fmt=".3g",
+            title_kwargs={"fontsize": 12}
+        )
         plt.savefig('joint_post_corner.pdf', bbox_inches='tight')
+
+
+def problem1a(alpha, f):
+    print(f"Problem 1: For {alpha=}, {f=}, predicted T={likelihood.model_T_simple(alpha, f)}")
 
 
 # Stop module loading when imported.  Otherwise continue running.
 if __name__ == '__main__':
-    main()
+    problem1a(0.3, 0.6)
+    # main()

@@ -17,6 +17,13 @@ def model_T(alpha, f0, f1, Y_C02):
     return np.power((S / 4) * (1 - alpha) / (Stefan_Boltzmann * (1 - 0.5 * f)), 0.25)
 
 
+def model_T_simple(alpha, f):
+    """
+    Returns the temperature T for a given alpha and f.
+    """
+    return np.power((S / 4) * (1 - alpha) / (Stefan_Boltzmann * (1 - 0.5 * f)), 0.25)
+
+
 def likelihood(alpha, f0, f1):
     """
     Returns the log of the likelihood function alpha, f0, f1
