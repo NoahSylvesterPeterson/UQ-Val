@@ -1,9 +1,10 @@
 import numpy as np
+import scipy.stats as stats
 from scipy.special import erfinv
 
 
 def log_prior_normal(x, mean, std):
-    return -0.5 * (np.log(2 * np.pi * std**2) + (x - mean)**2 / (std**2))
+    return stats.norm.logpdf(x, loc=mean, scale=std)
 
 
 def log_prior_uniform(x, low, high):
@@ -22,7 +23,7 @@ def prior_f0(alpha):
 
 
 def prior_f1(alpha):
-    return log_prior_uniform(alpha, 0, 1)
+    return log_prior_uniform(alpha, -0.005, 0.005)
 
 
 def prior(alpha, f0, f1):

@@ -40,40 +40,6 @@ plt.rcParams["font.size"] = 12
 fdict = {'prior_alpha': prior.prior_alpha, 'prior_f0': prior.prior_f0, 'prior_f1': prior.prior_f1}
 
 
-def ReadSiple2():
-    # pd.read_csv("siple_1", usecols=(3, 4), names=["year", "CO2"])
-    data_old = pd.read_csv("data/siple_2.csv", usecols=(1, 2), header=0, names=["year", "CO2"])
-    return (data_old)
-
-
-def read_atmospheric_CO2_data():
-    data_new = pd.read_csv("data/Maunoa_Lao_atmospheric_CO2_levels_1956-2024.csv",
-                           skiprows=44, usecols=(0, 1), header=0, names=["year", "CO2"])
-    data_old = ReadSiple2()
-    data = pd.concat([data_old, data_new], ignore_index=True)
-    return data
-
-
-def read_temperature_data():
-    """Reads the temperature data from the file and returns it as a numpy array."""
-    data: pd.DataFrame = pd.read_csv("data/globalTemperatureAnomoly1900-2024.csv",
-                                     skiprows=4, usecols=(0, 1), header=0, names=["year", "anomaly"])
-    data["temperature"] = data["anomaly"] + 286.9
-
-    return data[["year", "temperature"]]
-
-
-def read_data():
-    temp_data = read_temperature_data()
-    co2_data = read_atmospheric_CO2_data()
-    temp_data["year"] = pd.to_datetime(temp_data["year"], format="%Y")
-    co2_data["year"] = pd.to_datetime(co2_data["year"], format="%Y")
-    temp_data.set_index("year", inplace=True)
-    co2_data.set_index("year", inplace=True)
-    data = pd.merge(co2_data, temp_data, left_index=True, right_index=True)
-    return data
-
-
 def plotter(chain, quant, xmin=None, xmax=None):
     """subroutine that generates a .pdf file plotting a quantity"""
     bins = np.linspace(np.min(chain), np.max(chain), 200)
@@ -145,18 +111,19 @@ def main():
     # initial guesses for the walkers starting locations
     guess_alpha = 0.5
     guess_f0 = 0.5
-    guess_f1 = 0.5
+    guess_f1 = 0.0
 
     params0 = np.tile([guess_alpha, guess_f0, guess_f1], nwalk).reshape(nwalk, 3)
     params0[:, 0] += np.random.randn(nwalk) * 0.5    # Perturb alpha
+    params0[:, 0] = np.clip(params0[:, 0], 0, 1)
     params0[:, 1] += np.random.randn(nwalk) * 0.5    # Perturb f0
-    params0[:, 2] += np.random.randn(nwalk) * 0.5    # Perturb f1
-    params0 = np.clip(params0, 0, 1)
+    params0[:, 1] = np.clip(params0[:, 1], 0, 1)
+    params0[:, 2] += np.random.randn(nwalk) * 0.01    # Perturb f1
 
     print("\nInitializing the sampler and burning in walkers")
-    with Pool(10) as pool:
+    with Pool(12) as pool:
         sampler = BayesianRichardsonExtrapolation()
-        s = EnsembleSampler(nwalk, params0.shape[-1], sampler, pool=pool)
+        s = EnsembleSampler(nwalk, 3, sampler, pool=pool)
         pos, prob, state = s.run_mcmc(params0, 15000, progress=True)
         s.reset()
         finished = False
@@ -178,7 +145,7 @@ def main():
 
             except autocorr.AutocorrError as err:
                 tau = err.tau
-
+                print(f"{tau=}")
                 print(f"step {step}  progress {step/(tau*50)}")
 
         # final sampling
@@ -189,9 +156,14 @@ def main():
 
         # 1d Marginals
         print("\nDetails for posterior one-dimensional marginals:")
+
         # Remove a sufficient number of burn-in steps
-        burn = int(np.ceil(np.max(tau)) * 2)
+        burn = 0  # int(np.ceil(np.max(tau)) * 2)
         flat_samples = s.get_chain(discard=burn, flat=True)
+
+        textual_boxplot("alpha", flat_samples[:, 0], header=True)
+        textual_boxplot("f0", flat_samples[:, 1], header=False)
+        textual_boxplot("f1", flat_samples[:, 2], header=False)
 
         # FIGURES: Marginal posterior(s)
         print("\nPrinting PDF output")
@@ -213,7 +185,7 @@ def main():
 
 
 def vis_data():
-    data = read_data()
+    data = likelihood.read_data()
     plt.plot(data)
     plt.savefig('./tmp.png')
 
@@ -231,7 +203,7 @@ def lsqr_fn(x, data):
 
 def problem1b():
     print("\n[bold]Problem 1b: Least squares optimization")
-    data = read_data()
+    data = likelihood.read_data()
     init = (0, 0, 0)
     res: optimize.OptimizeResult = optimize.least_squares(
         lambda p: lsqr_fn(p, data),
@@ -249,11 +221,13 @@ def problem1b():
     f = likelihood.embedded_f_linear(f0, f1, data["CO2"])
     if np.any(f < 0) or np.any(f > 1):
         print(f"\t[yellow]Warning: {len(f[f > 1]) + len(f[f<0])} f values are out of bounds!")
+    return alpha, f0, f1
 
 
 if __name__ == '__main__':
     problem1a(0.3, 0.6)
-    problem1b()
+    params = problem1b()
     pd.set_option('display.max_rows', None)
     # print(read_data().head(81))
     vis_data()
+    main()
