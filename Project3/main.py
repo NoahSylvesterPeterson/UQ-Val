@@ -2,7 +2,7 @@
 from matplotlib.ticker import FormatStrFormatter
 from multiprocessing import Pool
 from math import ceil, floor
-from emcee import EnsembleSampler, autocorr
+from emcee import EnsembleSampler, autocorr, moves
 import likelihood
 import prior
 from scipy import stats, optimize
@@ -106,7 +106,7 @@ def textual_boxplot(label, unordered, header):
 def main():
     # initialize the Bayesian Calibration Procedure
     print("\nInitializing walkers")
-    nwalk = 100
+    nwalk = 3 * 24
 
     # initial guesses for the walkers starting locations
     guess_alpha = 0.5
@@ -118,38 +118,49 @@ def main():
     params0[:, 0] = np.clip(params0[:, 0], 0, 1)
     params0[:, 1] += np.random.randn(nwalk) * 0.5    # Perturb f0
     params0[:, 1] = np.clip(params0[:, 1], 0, 1)
-    params0[:, 2] += np.random.randn(nwalk) * 0.01    # Perturb f1
+    params0[:, 2] += np.random.randn(nwalk) * 0.005    # Perturb f1
+    params0[:, 2] = np.clip(params0[:, 2], -0.005, 0.005)
 
     print("\nInitializing the sampler and burning in walkers")
-    with Pool(12) as pool:
+    with Pool(24) as pool:
         sampler = BayesianRichardsonExtrapolation()
-        s = EnsembleSampler(nwalk, 3, sampler, pool=pool)
-        pos, prob, state = s.run_mcmc(params0, 15000, progress=True)
+        s = EnsembleSampler(nwalk, 3, sampler, pool=pool, moves=[
+            (moves.DEMove()),
+            (moves.DESnookerMove()),
+        ],)
+        pos, prob, state = s.run_mcmc(params0, 15000, progress=True, tune=True)
         s.reset()
         finished = False
         step = 0
         step_size = 5000
         print("\nSampling the posterior density for the problem")
-        while not finished:
+        while not finished or step < 20000:
             # Use autocorrelation time to determine if we have converged
             # adapted from https://groups.google.com/g/emcee-users/c/KuoXbQTH_8Q
-            pos, _, _ = s.run_mcmc(pos, step_size, progress=True)
+            pos, _, _ = s.run_mcmc(pos, step_size, progress=True, tune=True)
             step += step_size
             try:
                 tau = s.get_autocorr_time()
 
-                print(f"step {step}  progress {step/(tau*50)}")
+                if len(tau) != 3 or np.any(np.isnan(tau)):
+                    # s.reset()
+                    print(f"not enough burn-in steps, resetting")
+                    step_size += 5000
+                    continue
 
-                if not np.any(np.isnan(tau)):
+                print(f"step {step}  progress {step/(tau*50)} (acceptance fraction {s.acceptance_fraction.mean()}")
+                if not np.any(np.isnan(tau)) and not np.any(step / tau < 50):
                     finished = True
-
             except autocorr.AutocorrError as err:
                 tau = err.tau
+                if len(tau) != 3:
+                    step = 0
+                    s.reset()
                 print(f"{tau=}")
                 print(f"step {step}  progress {step/(tau*50)}")
 
         # final sampling
-        s.run_mcmc(pos, 10000, progress=True)
+        s.run_mcmc(pos, 10000, progress=True, tune=True)
         print(f'{tau=}')
 
         print("Mean acceptance fraction was %.3f" % s.acceptance_fraction.mean())
@@ -158,7 +169,7 @@ def main():
         print("\nDetails for posterior one-dimensional marginals:")
 
         # Remove a sufficient number of burn-in steps
-        burn = 0  # int(np.ceil(np.max(tau)) * 2)
+        burn = int(np.ceil(np.max(tau)) * 2)
         flat_samples = s.get_chain(discard=burn, flat=True)
 
         textual_boxplot("alpha", flat_samples[:, 0], header=True)

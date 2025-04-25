@@ -103,6 +103,9 @@ def compute_uncertainty(data, alpha, f0, f1):
 CALIBRATION_DATA = read_data()
 INITIAL_PARAMS = calibrate_lsqr(CALIBRATION_DATA)
 CALIBRATION_DATA = compute_uncertainty(CALIBRATION_DATA, *INITIAL_PARAMS)
+T = CALIBRATION_DATA["temperature"].to_numpy()
+VAR_T = CALIBRATION_DATA["var_T"].to_numpy()
+PDFS = [stats.norm(loc=T[i], scale=np.sqrt(VAR_T[i])) for i in range(len(T))]
 
 
 def likelihood(alpha, f0, f1):
@@ -117,5 +120,4 @@ def likelihood(alpha, f0, f1):
     if np.any(f < 0) or np.any(f > 1):
         return -np.inf
     T_m = np.power((S / 4) * (1 - alpha) / (Stefan_Boltzmann * (1 - 0.5 * f)), 0.25)
-    return np.sum(stats.norm.logpdf(T_m, loc=CALIBRATION_DATA["temperature"].to_numpy(),
-                                    scale=np.sqrt(CALIBRATION_DATA["var_T"].to_numpy())))
+    return sum(PDFS[i].logpdf(T_m[i]) for i in range(len(T_m)))

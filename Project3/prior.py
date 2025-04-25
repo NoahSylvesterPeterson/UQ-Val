@@ -15,11 +15,13 @@ def log_prior_uniform(x, low, high):
 
 
 def prior_alpha(alpha):
-    return log_prior_uniform(alpha, 0, 1)
+    return stats.beta.logpdf(alpha, a=2, b=2)
+    # return log_prior_uniform(alpha, 0, 1)
 
 
 def prior_f0(alpha):
-    return log_prior_uniform(alpha, 0, 1)
+    return stats.beta.logpdf(alpha, a=2, b=2)
+    # return log_prior_uniform(alpha, 0, 1)
 
 
 def prior_f1(alpha):
