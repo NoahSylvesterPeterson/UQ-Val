@@ -11,7 +11,7 @@ R = 6.38e6  # m
 def ReadSiple2():
     # pd.read_csv("siple_1", usecols=(3, 4), names=["year", "CO2"])
     data_old = pd.read_csv("data/siple_2.csv", usecols=(1, 2), header=0, names=["year", "CO2"])
-    data_old["stddev"] = 1.5
+    data_old["stddev"] = 3
     return (data_old)
 
 
@@ -28,7 +28,7 @@ def read_temperature_data():
     data: pd.DataFrame = pd.read_csv("data/globalTemperatureAnomoly1900-2024.csv",
                                      skiprows=4, usecols=(0, 1), header=0, names=["year", "anomaly"])
     data["temperature"] = data["anomaly"] + 286.9
-    data["stddev"] = 0.025
+    data["stddev"] = 0.05
 
     return data[["year", "temperature", "stddev"]]
 
@@ -49,6 +49,7 @@ CO2 = DATA["CO2"].to_numpy()
 TEMPERATURE = DATA["temperature"].to_numpy()
 STDDEV_CO2 = DATA["stddev_x"].to_numpy()
 STDDEV_T = DATA["stddev_y"].to_numpy()
+prior_means = [2.94230780e-01, 6.87644595e-01, 1.69095166e-04]
 
 
 def norm_logpdf(x, mean, var):
@@ -67,6 +68,45 @@ class Model(ABC):
     @abstractmethod
     def df_dco2(self, alpha, params, Y_C02):
         raise NotImplementedError("Subclasses must implement this method.")
+
+    def dmodel_dalpha(self, params, Y_C02):
+        """
+        Returns the derivative of the model with respect to alpha.
+        """
+        f = self.embedded_f(params, Y_C02)
+        c = np.power((S / 4) / (Stefan_Boltzmann * (1 - 0.5 * f)), 0.25)
+        return -c * 0.25 * np.power((1 - params[0]), -0.75)
+
+    def dmodel_df0(self, params, Y_C02):
+        """
+        Returns the derivative of the model with respect to f0.
+        """
+        f = self.embedded_f(params, Y_C02)
+        c = np.power((S / 4) * (1 - params[0]) / (Stefan_Boltzmann), 0.25)
+        return c * -0.25 * np.power(1 - 0.5 * f, -1.25) * (-0.5)
+
+    def dmodel_df1(self, params, Y_C02):
+        """
+        Returns the derivative of the model with respect to f1.
+        """
+        f = self.embedded_f(params, Y_C02)
+        c = np.power((S / 4) * (1 - params[0]) / (Stefan_Boltzmann), 0.25)
+        return c * -0.25 * np.power(1 - 0.5 * f, -1.25) * (-0.5 * Y_C02)
+
+    def dmodel_df2(self, params, Y_C02):
+        """
+        Returns the derivative of the model with respect to f2.
+        """
+        f = self.embedded_f(params, Y_C02)
+        c = np.power((S / 4) * (1 - params[0]) / (Stefan_Boltzmann), 0.25)
+        return c * -0.25 * np.power(1 - 0.5 * f, -1.25) * (-0.5 * Y_C02 ** 2)
+
+    def grad_params(self, params):
+        """
+        Returns the gradient of the model with respect to the parameters.
+        """
+        funcs = [self.dmodel_dalpha, self.dmodel_df0, self.dmodel_df1, self.dmodel_df2]
+        return np.column_stack([func(params, CO2) for func in funcs[:self.num_params]])
 
     @property
     @abstractmethod
@@ -103,6 +143,19 @@ class Model(ABC):
         Returns the temperature T for a given set of parameters.
         """
         return self.predict(params, CO2)
+
+    def linear_model(self, params):
+        c = self.evaluate(params)
+        grad_m = self.grad_params(params)
+        c -= grad_m @ np.asarray(params)
+        grad_m = np.concatenate((grad_m, c.reshape((len(c), 1))), axis=1)
+        return grad_m
+
+    def linear_log_likelihood(self, params):
+        A = self.linear_model(prior_means)
+        p = np.asarray([*params, 1])
+        T_m = A @ p
+        return np.sum(norm_logpdf(T_m, TEMPERATURE, STDDEV_T ** 2)) - 0.5 * len(T_m) * np.log(2 * np.pi)
 
     def log_likelihood(self, params):
         """
@@ -177,7 +230,7 @@ class ModelQuadratic(Model):
         return "ModelQuadratic"
 
 
-def compute_map(params):
+def compute_mle(params):
     """Compute the MAP estimate of the parameters."""
     # Compute the MAP estimate of the parameters
     def func(x):

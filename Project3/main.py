@@ -133,7 +133,7 @@ def main(model, lsqr_params):
     model_priors = priors[:ndim]
 
     # initial guesses for the walkers starting locations
-    map_estimate = likelihood.compute_map(initial_guesses[:ndim]).x
+    map_estimate = likelihood.compute_mle(initial_guesses[:ndim]).x
 
     params0 = np.tile(map_estimate, nwalk).reshape(nwalk, 3)
     params0[:, 0] += np.random.randn(nwalk) * 0.1 * map_estimate[0]    # Perturb alpha

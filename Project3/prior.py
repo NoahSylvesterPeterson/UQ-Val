@@ -2,8 +2,8 @@ import numpy as np
 import scipy.stats as stats
 
 
-def log_prior_normal(x, mean, std):
-    return stats.norm.logpdf(x, loc=mean, scale=std)
+def log_prior_normal(x, mean, var):
+    return -0.5 * (np.log(var) + (x - mean) ** 2 / var)
 
 
 def log_prior_uniform(x, low, high):
@@ -14,16 +14,19 @@ def log_prior_uniform(x, low, high):
 
 
 def prior_alpha(alpha):
-    return stats.beta.logpdf(alpha, a=2, b=2)
+    return log_prior_normal(alpha, mean=2.94230780e-01, var=2.94230780e-01**2)
+    # return stats.beta.logpdf(alpha, a=2, b=2)
     # return log_prior_uniform(alpha, 0, 1)
 
 
 def prior_f0(f0):
-    return log_prior_uniform(f0, 0, 1)
+    return log_prior_normal(f0, mean=6.87644595e-01, var=6.87644595e-01**2)
+    # return log_prior_uniform(f0, 0, 1)
 
 
 def prior_f1(f1):
-    return log_prior_uniform(f1, -0.005, 0.005)
+    return log_prior_normal(f1, mean=1.69095166e-04, var=1.69095166e-04**2)
+    # return log_prior_uniform(f1, -0.005, 0.005)
 
 
 def prior_f2(f1):
