@@ -26,6 +26,10 @@ def prior_f1(f1):
     return log_prior_uniform(f1, -0.005, 0.005)
 
 
+def prior_f2(f1):
+    return log_prior_uniform(f1, -2.5e-5, 2.5e-5)
+
+
 def prior(alpha, f0, f1):
     """
     Returns the log of the prior probability distribution evaluated at alpha, f0, f1.
