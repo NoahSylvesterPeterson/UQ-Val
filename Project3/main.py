@@ -3,6 +3,7 @@ from matplotlib.ticker import FormatStrFormatter
 from multiprocessing import Pool
 from math import ceil, floor
 from emcee import EnsembleSampler, autocorr, moves
+import emcee
 import likelihood
 import prior
 from scipy import stats, optimize
@@ -83,7 +84,7 @@ def sample_walkers(CO2, nsamples, flattened_chain):
     params = flattened_chain[draw]
     for i, param_set in enumerate(params):
         models[i, :] = likelihood.model_T(*param_set, CO2)
-    spread = np.std(models, axis=0, ddof=1)
+    spread = np.std(models, axis=0)
     med_model = np.median(models, axis=0)
     return med_model, spread, models
 
@@ -92,10 +93,15 @@ class BayesianRichardsonExtrapolation():
     """Computes the Bayesian Richardson extrapolation posterior log density."""
 
     def __call__(self, params, dtype=np.double):
-        return (
-            prior.prior(*params) +
-            likelihood.likelihood(*params)
-        )
+        alpha, f0, f1 = params
+        log_prior_alpha = prior.prior_alpha(alpha)
+        log_prior_f0 = prior.prior_f0(f0)
+        log_prior_f1 = prior.prior_f1(f1)
+        log_prior = log_prior_alpha + log_prior_f0 + log_prior_f1
+        log_likelihood = likelihood.likelihood(*params)
+        if not np.isfinite(log_prior) or not np.isfinite(log_likelihood):
+            return -np.inf, log_prior_alpha, log_prior_f0, log_prior_f1
+        return log_likelihood + log_prior, log_prior_alpha, log_prior_f0, log_prior_f1
 
 
 def textual_boxplot(label, unordered, header):
@@ -119,6 +125,7 @@ def textual_boxplot(label, unordered, header):
 def main(lsqr_params):
     # initialize the Bayesian Calibration Procedure
     print("\nInitializing walkers")
+    filename = "mcmc.h5"
     nwalk = 6 * 24
     ndim = 3
 
@@ -139,9 +146,13 @@ def main(lsqr_params):
     params0[:, 2] = np.clip(params0[:, 2], -0.005, 0.005)
 
     print("\nInitializing the sampler and burning in walkers")
+
+    backend = emcee.backends.HDFBackend(filename)
+    backend.reset(nwalk, ndim)
+
     with Pool(24) as pool:
         sampler = BayesianRichardsonExtrapolation()
-        s = EnsembleSampler(nwalk, 3, sampler, pool=pool, moves=[
+        s = EnsembleSampler(nwalk, ndim, sampler, pool=pool, backend=backend, moves=[
             moves.DEMove(),
             moves.DESnookerMove()
         ])
@@ -159,7 +170,7 @@ def main(lsqr_params):
             try:
                 tau = s.get_autocorr_time()
 
-                if len(tau) != 3:
+                if len(tau) != ndim:
                     s.reset()
                     print(f"not enough burn-in steps, resetting")
                     step_size += 5000
