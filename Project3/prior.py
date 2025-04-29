@@ -1,6 +1,6 @@
 import numpy as np
 import scipy.stats as stats
-from scipy.special import erfinv
+import scipy.special as sp
 
 
 def log_prior_normal(x, mean, std):
@@ -9,23 +9,22 @@ def log_prior_normal(x, mean, std):
 
 def log_prior_uniform(x, low, high):
     if low <= x <= high:
-        return -np.log(high - low)
+        return 0
     else:
         return -np.inf
 
 
 def prior_alpha(alpha):
-    return stats.beta.logpdf(alpha, a=2, b=2)
-    # return log_prior_uniform(alpha, 0, 1)
+    # return stats.beta.logpdf(alpha, a=2, b=2)
+    return log_prior_uniform(alpha, 0, 1)
 
 
-def prior_f0(alpha):
-    return stats.beta.logpdf(alpha, a=2, b=2)
-    # return log_prior_uniform(alpha, 0, 1)
+def prior_f0(f0):
+    return log_prior_uniform(f0, 0, 1)
 
 
-def prior_f1(alpha):
-    return log_prior_uniform(alpha, -0.005, 0.005)
+def prior_f1(f1):
+    return log_prior_uniform(f1, -0.005, 0.005)
 
 
 def prior(alpha, f0, f1):

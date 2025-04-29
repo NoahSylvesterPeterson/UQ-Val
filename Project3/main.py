@@ -51,7 +51,7 @@ def plotter(chain, quant, xmin=None, xmax=None):
     # plot prior (requires some cleverness to do in general)
     qpr = [fdict['prior_' + quant](x) for x in bins]
     qpri = [np.exp(x) for x in qpr]
-    qpri = qpri / np.linalg.norm(qpri)
+    qpri = qpri
     ax2 = plt.twinx(plt.gca())
     ax2.plot(bins, qpri, 'k', linewidth=3, label=f"Prior $\\pi_0({quant})$", zorder=1)
     ax2.set_ylabel(f'$\\pi_0({quant})$', fontsize=16)
@@ -73,6 +73,19 @@ def plotter(chain, quant, xmin=None, xmax=None):
     ax.set_xlabel(f'${quant}$', fontsize=16)
     fig.legend(loc='outside upper center', fontsize=16, ncol=2)
     plt.savefig(quant + '_post.pdf', bbox_inches='tight')
+    plt.close()
+
+
+def sample_walkers(CO2, nsamples, flattened_chain):
+    CO2 = np.asarray(CO2)
+    models = np.zeros((nsamples, len(CO2)))
+    draw = np.floor(np.random.uniform(0, len(flattened_chain), size=nsamples)).astype(int)
+    params = flattened_chain[draw]
+    for i, param_set in enumerate(params):
+        models[i, :] = likelihood.model_T(*param_set, CO2)
+    spread = np.std(models, axis=0, ddof=1)
+    med_model = np.median(models, axis=0)
+    return med_model, spread, models
 
 
 class BayesianRichardsonExtrapolation():
@@ -103,53 +116,62 @@ def textual_boxplot(label, unordered, header):
     return d.mean(), 2 * d.std()
 
 
-def main():
+def main(lsqr_params):
     # initialize the Bayesian Calibration Procedure
     print("\nInitializing walkers")
-    nwalk = 3 * 24
+    nwalk = 6 * 24
+    ndim = 3
+
+    data = likelihood.read_data()
 
     # initial guesses for the walkers starting locations
-    guess_alpha = 0.5
-    guess_f0 = 0.5
-    guess_f1 = 0.0
+    map_estimate = likelihood.compute_map(data, 0.3, 0.7, 0.0002).x
+    guess_alpha = map_estimate[0]
+    guess_f0 = map_estimate[1]
+    guess_f1 = map_estimate[2]
 
     params0 = np.tile([guess_alpha, guess_f0, guess_f1], nwalk).reshape(nwalk, 3)
-    params0[:, 0] += np.random.randn(nwalk) * 0.5    # Perturb alpha
+    params0[:, 0] += np.random.randn(nwalk) * 0.1 * guess_alpha    # Perturb alpha
     params0[:, 0] = np.clip(params0[:, 0], 0, 1)
-    params0[:, 1] += np.random.randn(nwalk) * 0.5    # Perturb f0
+    params0[:, 1] += np.random.randn(nwalk) * 0.1 * guess_f0   # Perturb f0
     params0[:, 1] = np.clip(params0[:, 1], 0, 1)
-    params0[:, 2] += np.random.randn(nwalk) * 0.005    # Perturb f1
+    params0[:, 2] += np.random.randn(nwalk) * 0.1 * guess_f1   # Perturb f1
     params0[:, 2] = np.clip(params0[:, 2], -0.005, 0.005)
 
     print("\nInitializing the sampler and burning in walkers")
     with Pool(24) as pool:
         sampler = BayesianRichardsonExtrapolation()
         s = EnsembleSampler(nwalk, 3, sampler, pool=pool, moves=[
-            (moves.DEMove()),
-            (moves.DESnookerMove()),
-        ],)
-        pos, prob, state = s.run_mcmc(params0, 15000, progress=True, tune=True)
+            moves.DEMove(),
+            moves.DESnookerMove()
+        ])
+        pos, _, _ = s.run_mcmc(params0, 4000, progress=True, tune=True)
         s.reset()
         finished = False
         step = 0
-        step_size = 5000
+        step_size = 2000
         print("\nSampling the posterior density for the problem")
-        while not finished or step < 20000:
+        while not finished:
             # Use autocorrelation time to determine if we have converged
             # adapted from https://groups.google.com/g/emcee-users/c/KuoXbQTH_8Q
-            pos, _, _ = s.run_mcmc(pos, step_size, progress=True, tune=True)
+            pos = s.run_mcmc(pos, step_size, progress=True, tune=True)
             step += step_size
             try:
                 tau = s.get_autocorr_time()
 
-                if len(tau) != 3 or np.any(np.isnan(tau)):
-                    # s.reset()
+                if len(tau) != 3:
+                    s.reset()
                     print(f"not enough burn-in steps, resetting")
                     step_size += 5000
                     continue
+                if np.any(np.isnan(tau)):
+                    print(f"step {step}  progress {step/(tau*50)} (acceptance fraction {s.acceptance_fraction.mean()})")
+                    s.reset()
+                    print(f"not enough burn-in steps, resetting")
+                    continue
 
-                print(f"step {step}  progress {step/(tau*50)} (acceptance fraction {s.acceptance_fraction.mean()}")
-                if not np.any(np.isnan(tau)) and not np.any(step / tau < 50):
+                print(f"step {step}  progress {step/(tau*50)} (acceptance fraction {s.acceptance_fraction.mean()})")
+                if not np.any(step / (tau * 50) < 1):
                     finished = True
             except autocorr.AutocorrError as err:
                 tau = err.tau
@@ -160,7 +182,7 @@ def main():
                 print(f"step {step}  progress {step/(tau*50)}")
 
         # final sampling
-        s.run_mcmc(pos, 10000, progress=True, tune=True)
+        s.run_mcmc(pos, 4000, progress=True, tune=True)
         print(f'{tau=}')
 
         print("Mean acceptance fraction was %.3f" % s.acceptance_fraction.mean())
@@ -183,16 +205,103 @@ def main():
         plotter(flat_samples[:, 1], 'f0')
         plotter(flat_samples[:, 2], 'f1')
 
+        means = np.mean(flat_samples, axis=0)
+        print(f"\nPosterior means: {means}")
         # FIGURE: Joint posterior(s)
-        corner.corner(
+        figure = corner.corner(
             flat_samples,
             labels=[r"$\alpha$", r"$f_0$", r"$f_1$"],
-            quantiles=[0.025, 0.5, 0.975],
+            quantiles=[0.16, 0.5, 0.84],
             show_titles=True,
             title_fmt=".3g",
             title_kwargs={"fontsize": 12}
         )
+        axes = np.array(figure.axes).reshape((ndim, ndim))
+        # Loop over the diagonal
+        for i in range(ndim):
+            ax = axes[i, i]
+            ax.axvline(means[i], color="r")
+
+        # Loop over the histograms
+        for yi in range(ndim):
+            for xi in range(yi):
+                ax = axes[yi, xi]
+                ax.axvline(means[xi], color="r")
+                ax.axhline(means[yi], color="r")
+                ax.plot(means[xi], means[yi], "sr")
+
         plt.savefig('joint_post_corner.pdf', bbox_inches='tight')
+        plt.close()
+
+        # Make predictions
+        best_i = np.argmax(s.flatlnprobability)
+        max_likelihood_params = flat_samples[best_i]
+        best_fit_model = likelihood.model_T(*max_likelihood_params, data["CO2"])
+        best_alpha, best_f0, best_f1 = max_likelihood_params
+        print(f"\nBest fit model: alpha={best_alpha}, f0={best_f0}, f1={best_f1}")
+        print(f"\tLog Probability: {s.flatlnprobability[best_i]}")
+
+        fig, ax = plt.subplots(figsize=(6, 4))
+        median, spread, models = sample_walkers(data["CO2"], 400, flat_samples)
+        mean = np.mean(models, axis=0)
+        print(spread)
+        plt.errorbar(data["CO2"], data["temperature"], yerr=2 * data["stddev_y"], fmt='o', color='black',
+                     markersize=5, label='Observed data with 2$\\sigma$ error bars', zorder=1)
+        plt.fill_between(
+            data["CO2"],
+            median - 2 * spread,
+            median + 2 * spread,
+            color='grey',
+            alpha=0.5,
+            label=r'$2\sigma$ Posterior Spread', zorder=2)
+        plt.plot(data["CO2"], mean, color='orange', label='Posterior predictive mean', zorder=10)
+        plt.plot(
+            data["CO2"],
+            likelihood.model_T(
+                *lsqr_params,
+                data["CO2"]),
+            color='blue',
+            linestyle='--',
+            label='Least squares model', zorder=9)
+        plt.xlabel('CO2 concentration (ppm)')
+        plt.ylabel('Temperature (K)')
+        plt.legend()
+        plt.savefig('posterior.pdf', bbox_inches='tight')
+        plt.close()
+
+        fig, ax = plt.subplots(figsize=(6, 4))
+        plt.fill_between(
+            data["CO2"],
+            median - 2 * spread,
+            median + 2 * spread,
+            color='grey',
+            alpha=0.5,
+            label=r'$2\sigma$ Posterior Spread')
+        plt.errorbar(data["CO2"], data["temperature"], yerr=2 * data["stddev_y"], fmt='o', color='black',
+                     markersize=5, label='Observed data with 2$\\sigma$ error bars', zorder=1)
+        plt.plot(
+            data["CO2"],
+            likelihood.model_T(
+                *lsqr_params,
+                data["CO2"]),
+            color='blue',
+            linestyle='--',
+            label='Least squares model', zorder=9)
+        plt.plot(data["CO2"], best_fit_model, color='orange', label='Highest likelihood model', zorder=10)
+        plt.xlabel('CO2 concentration (ppm)')
+        plt.ylabel('Temperature (K)')
+        # plt.title('Posterior predictive distribution', fontsize=16)
+        plt.legend()
+        plt.savefig('posterior_best_fit.pdf', bbox_inches='tight')
+        plt.close()
+
+        pred_CO2 = [717.0]
+        pred_T, stdev_T, models_T = sample_walkers(pred_CO2, 400, flat_samples)
+        pred_T_mean = np.mean(models_T, axis=0)
+        print(f"Predicted temperature for CO2 concentration {pred_CO2} ppm:\n")
+        print(f"\tMedian: {pred_T[0]:.6g} ± {2*stdev_T[0]:.6g} K")
+        print(f"\tMean:   {pred_T_mean[0]:.6g} ± {2*stdev_T[0]:.6g} K")
+        return means
 
 
 def vis_data():
@@ -228,7 +337,8 @@ def problem1b():
     alpha, f0, f1 = res.x
     print(f"\tParameters: {alpha=}, {f0=}, {f1=}")
     print(f"\tCost function value:", res.cost)
-    print(f"\tMSQR:", np.linalg.norm(res.fun) / len(data["temperature"]))
+    print(f"\tMRSQ:", np.linalg.norm(res.fun) / len(data["temperature"]))
+    print(f"\tLog likelihood:", -likelihood.likelihood(alpha, f0, f1, data))
     f = likelihood.embedded_f_linear(f0, f1, data["CO2"])
     if np.any(f < 0) or np.any(f > 1):
         print(f"\t[yellow]Warning: {len(f[f > 1]) + len(f[f<0])} f values are out of bounds!")
@@ -240,5 +350,6 @@ if __name__ == '__main__':
     params = problem1b()
     pd.set_option('display.max_rows', None)
     # print(read_data().head(81))
-    vis_data()
-    main()
+    # vis_data()
+    mean_params = main(params)
+    print("MCMC final -log likelihood function: ", -likelihood.likelihood(*mean_params))

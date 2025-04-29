@@ -62,28 +62,6 @@ def model_T_simple(alpha, f):
     return np.power((S / 4) * (1 - alpha) / (Stefan_Boltzmann * (1 - 0.5 * f)), 0.25)
 
 
-def lsqr_fn(x, data):
-    """Least squares function to minimize."""
-    alpha, f0, f1 = x
-    model = model_T(alpha, f0, f1, data["CO2"])
-    return data["temperature"] - model
-
-
-def calibrate_lsqr(data):
-    init = (0, 0, 0)
-    res: optimize.OptimizeResult = optimize.least_squares(
-        lambda p: lsqr_fn(p, data),
-        init,
-        bounds=([0, 0, -np.inf], [1, 1, np.inf]),
-    )
-    if res.success:
-        print("\tOptimization was successful.", res.x)
-    else:
-        print("\tOptimization failed.")
-    alpha, f0, f1 = res.x
-    return alpha, f0, f1
-
-
 def dmodel_dco2(alpha, f0, f1, Y_C02):
     """
     Returns the derivative of the model with respect to CO2.
@@ -94,21 +72,21 @@ def dmodel_dco2(alpha, f0, f1, Y_C02):
 
 
 def compute_uncertainty(data, alpha, f0, f1):
-    data["dT_dCO2"] = dmodel_dco2(alpha, f0, f1, data["CO2"].to_numpy())
-    data["var_CO2"] = data["stddev_x"].to_numpy() ** 2 * data["dT_dCO2"].to_numpy() ** 2
-    data["var_T"] = data["stddev_y"].to_numpy() ** 2 + data["var_CO2"].to_numpy()
-    return data
+    dT_dCO2 = dmodel_dco2(alpha, f0, f1, data["CO2"].to_numpy())
+    var_CO2 = (data["stddev_x"].to_numpy() ** 2) * (dT_dCO2 ** 2)
+    var_T = (data["stddev_y"].to_numpy() ** 2) + var_CO2
+    return var_T
 
 
-CALIBRATION_DATA = read_data()
-INITIAL_PARAMS = calibrate_lsqr(CALIBRATION_DATA)
-CALIBRATION_DATA = compute_uncertainty(CALIBRATION_DATA, *INITIAL_PARAMS)
-T = CALIBRATION_DATA["temperature"].to_numpy()
-VAR_T = CALIBRATION_DATA["var_T"].to_numpy()
-PDFS = [stats.norm(loc=T[i], scale=np.sqrt(VAR_T[i])) for i in range(len(T))]
+def norm_logpdf(x, mean, var):
+    """
+    Returns the log of the normal probability density function evaluated at x, with mean and variance var.
+    Omits the constant -0.5 * log(2 * pi).
+    """
+    return -0.5 * (np.log(var) + (x - mean) * (x - mean) / var)
 
 
-def likelihood(alpha, f0, f1):
+def likelihood(alpha, f0, f1, data=None):
     """
     Returns the log of the likelihood function alpha, f0, f1
     """
@@ -116,8 +94,66 @@ def likelihood(alpha, f0, f1):
         return -np.inf
     if f0 < 0 or f0 > 1:
         return -np.inf
-    f = embedded_f_linear(f0, f1, CALIBRATION_DATA["CO2"].to_numpy())
+    if data is None:
+        data = CALIBRATION_DATA
+    CO2 = data["CO2"].to_numpy()
+    f = embedded_f_linear(f0, f1, CO2)
     if np.any(f < 0) or np.any(f > 1):
         return -np.inf
-    T_m = np.power((S / 4) * (1 - alpha) / (Stefan_Boltzmann * (1 - 0.5 * f)), 0.25)
-    return sum(PDFS[i].logpdf(T_m[i]) for i in range(len(T_m)))
+    var = compute_uncertainty(data, alpha, f0, f1)
+    T = data["temperature"].to_numpy()
+    T_m = model_T(alpha, f0, f1, CO2)
+    return sum(norm_logpdf(T_m[i], T[i], var[i]) for i in range(len(T_m)))
+
+
+NEG_INF = -1e10
+
+
+def compute_map(data, alpha, f0, f1):
+    """Compute the MAP estimate of the parameters."""
+    # Compute the MAP estimate of the parameters
+    def func(params):
+        alpha, f0, f1 = params
+        l = -max(likelihood(alpha, f0, f1, data), NEG_INF)
+        if np.isnan(l):
+            return 1e10
+        return l
+    CO2 = data["CO2"].to_numpy()
+    A = np.column_stack([np.zeros_like(CO2), np.ones_like(CO2), CO2])
+    lb = np.zeros_like(CO2)
+    ub = np.ones_like(CO2)
+
+    res = optimize.minimize(
+        func,
+        (alpha, f0, f1),
+        bounds=optimize.Bounds([0, 0, -0.005], [1, 1, 0.005], [True, True, True]),
+        # constraints=[optimize.LinearConstraint(A, lb, ub, keep_feasible=True)],
+        # jac="3-point",
+        # method="trust-constr",
+        method="Nelder-Mead",
+        tol=1e-16
+    )
+    if res.success:
+        print("\tOptimization was successful: ", res.x)
+    else:
+        print("\tOptimization failed.")
+    return res
+
+
+def update_uncertainty(data, alpha, f0, f1):
+    data["var_T"] = compute_uncertainty(data, alpha, f0, f1)
+    return data
+
+
+CALIBRATION_DATA = read_data()
+INITIAL_PARAMS = compute_map(CALIBRATION_DATA, 0.3, 0.7, 0.0002).x
+CALIBRATION_DATA = update_uncertainty(CALIBRATION_DATA, *INITIAL_PARAMS)
+T = CALIBRATION_DATA["temperature"].to_numpy()
+CO2 = CALIBRATION_DATA["CO2"].to_numpy()
+VAR_T = CALIBRATION_DATA["var_T"].to_numpy()
+print(VAR_T[:20])
+
+const_term = np.sum(-0.5 * np.log(2 * np.pi * VAR_T))
+
+
+PDFS = [stats.norm(loc=T[i], scale=np.sqrt(VAR_T[i])) for i in range(len(T))]
