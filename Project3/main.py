@@ -345,6 +345,40 @@ def problem1b():
     return alpha, f0, f1
 
 
+def plot_analytical_calibration(model, nsample=100000):
+    # Plot the analytical calibration
+    posterior: stats.rv_continuous = model.linear_model(likelihood.prior_means)
+    temp_chain = posterior.rvs(size=nsample)
+    means = posterior.mean
+    print(f"\nPosterior means: {means}")
+    # FIGURE: Joint posterior(s)
+    full_labels = ["$\\alpha$", "$f_0$", "$f_1$", "$f_2$"]
+    figure = corner.corner(
+        temp_chain,
+        labels=full_labels[:model.num_params],
+        quantiles=[0.16, 0.5, 0.84],
+        show_titles=True,
+        title_fmt=".3g",
+        title_kwargs={"fontsize": 12}
+    )
+    axes = np.array(figure.axes).reshape((model.num_params, model.num_params))
+    # Loop over the diagonal
+    for i in range(model.num_params):
+        ax = axes[i, i]
+        ax.axvline(means[i], color="r")
+
+    # Loop over the histograms
+    for yi in range(model.num_params):
+        for xi in range(yi):
+            ax = axes[yi, xi]
+            ax.axvline(means[xi], color="r")
+            ax.axhline(means[yi], color="r")
+            ax.plot(means[xi], means[yi], "sr")
+
+    plt.savefig('analytical_joint_post_corner.pdf', bbox_inches='tight')
+    plt.close()
+
+
 if __name__ == '__main__':
     problem1a(0.3, 0.6)
     params = problem1b()
@@ -352,5 +386,6 @@ if __name__ == '__main__':
     # print(read_data().head(81))
     # vis_data()
     model = likelihood.MODEL_T_LINEAR
-    mean_params = main(model, params)
-    print("MCMC final -log likelihood function: ", -model.log_likelihood(mean_params))
+    plot_analytical_calibration(model)
+    # mean_params = main(model, params)
+    # print("MCMC final -log likelihood function: ", -model.log_likelihood(mean_params))

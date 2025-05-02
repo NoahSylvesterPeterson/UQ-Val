@@ -145,17 +145,18 @@ class Model(ABC):
         return self.predict(params, CO2)
 
     def linear_model(self, params):
-        c = self.evaluate(params)
+        params = np.asarray(params)
         grad_m = self.grad_params(params)
-        c -= grad_m @ np.asarray(params)
-        grad_m = np.concatenate((grad_m, c.reshape((len(c), 1))), axis=1)
-        return grad_m
-
-    def linear_log_likelihood(self, params):
-        A = self.linear_model(prior_means)
-        p = np.asarray([*params, 1])
-        T_m = A @ p
-        return np.sum(norm_logpdf(T_m, TEMPERATURE, STDDEV_T ** 2)) - 0.5 * len(T_m) * np.log(2 * np.pi)
+        var_params = params
+        sigma_T_inv = np.diag(self.variance(params)**-1)
+        sigma_theta_inv = np.diag(var_params**-1)
+        T_tilde = TEMPERATURE - (self.evaluate(params) - grad_m @ params)
+        gamma = grad_m.T @ sigma_T_inv @ grad_m + sigma_theta_inv
+        sigma = np.linalg.inv(gamma)
+        gammma_phi = grad_m.T @ sigma_T_inv @ T_tilde + sigma_theta_inv @ params
+        phi = np.linalg.solve(gamma, gammma_phi)
+        print("Posterior mean: ", phi)
+        return stats.multivariate_normal(mean=phi, cov=sigma, allow_singular=True)
 
     def log_likelihood(self, params):
         """
