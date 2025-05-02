@@ -92,17 +92,15 @@ def sample_walkers(model, CO2, nsamples, flattened_chain):
 class BayesianRichardsonExtrapolation():
     """Computes the Bayesian Richardson extrapolation posterior log density."""
 
-    def __init__(self, model: likelihood.Model, priors: list[callable]):
+    def __init__(self, model: likelihood.Model):
         self.model = model
-        self.priors = priors
 
     def __call__(self, params, dtype=np.double):
-        log_priors = [prior(param) for prior, param in zip(self.priors, params)]
-        log_prior = sum(log_priors)
+        log_prior = prior.prior(self.model, params)
         log_likelihood = self.model.log_likelihood(params)
         if not np.isfinite(log_prior) or not np.isfinite(log_likelihood):
-            return -np.inf, log_priors
-        return log_likelihood + log_prior, log_priors
+            return -np.inf
+        return log_likelihood + log_prior
 
 
 def textual_boxplot(label, unordered, header):
@@ -127,13 +125,11 @@ def main(model, lsqr_params):
     # initialize the Bayesian Calibration Procedure
     print("\nInitializing walkers")
     filename = "mcmc.h5"
-    nwalk = 6 * 24
+    nwalk = 100
     ndim = model.num_params
-    initial_guesses = (0.3, 0.7, 0.0002, 0.000001)
-    model_priors = priors[:ndim]
 
     # initial guesses for the walkers starting locations
-    map_estimate = likelihood.compute_mle(initial_guesses[:ndim]).x
+    map_estimate = likelihood.compute_mle(model, likelihood.initial_guesses[:ndim]).x
 
     params0 = np.tile(map_estimate, nwalk).reshape(nwalk, 3)
     params0[:, 0] += np.random.randn(nwalk) * 0.1 * map_estimate[0]    # Perturb alpha
@@ -152,13 +148,13 @@ def main(model, lsqr_params):
     backend = emcee.backends.HDFBackend(filename, name=f"{model}")
     backend.reset(nwalk, ndim)
 
-    with Pool(24) as pool:
-        sampler = BayesianRichardsonExtrapolation(model=model, priors=model_priors)
+    with Pool(8) as pool:
+        sampler = BayesianRichardsonExtrapolation(model=model)
         s = EnsembleSampler(nwalk, ndim, sampler, pool=pool, backend=backend, moves=[
             moves.DEMove(),
             moves.DESnookerMove()
         ])
-        pos, _, _, _ = s.run_mcmc(params0, 4000, progress=True, tune=True)
+        pos, _, _ = s.run_mcmc(params0, 4000, progress=True, tune=True)
         s.reset()
         finished = False
         step = 0
@@ -385,7 +381,10 @@ if __name__ == '__main__':
     pd.set_option('display.max_rows', None)
     # print(read_data().head(81))
     # vis_data()
-    model = likelihood.MODEL_T_LINEAR
-    plot_analytical_calibration(model)
-    # mean_params = main(model, params)
+    for model in [likelihood.MODEL_T_CONSTANT, likelihood.MODEL_T_QUADRATIC, likelihood.MODEL_T_LINEAR]:
+        analytical = model.linear_model(model.mle_means)
+        print(f"Prediction (linearized) for {model}: {model.predict(params, [717.0])}")
+        mcmc_means = main(model, params)
+        print(f"MCMC MAP for {model}: {mcmc_means}")
+    # plot_analytical_calibration(model)
     # print("MCMC final -log likelihood function: ", -model.log_likelihood(mean_params))

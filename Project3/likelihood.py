@@ -49,6 +49,7 @@ CO2 = DATA["CO2"].to_numpy()
 TEMPERATURE = DATA["temperature"].to_numpy()
 STDDEV_CO2 = DATA["stddev_x"].to_numpy()
 STDDEV_T = DATA["stddev_y"].to_numpy()
+initial_guesses = [0.3, 0.7, 0.0002, 0.000001]
 prior_means = [2.94230780e-01, 6.87644595e-01, 1.69095166e-04]
 
 
@@ -61,6 +62,11 @@ def norm_logpdf(x, mean, var):
 
 
 class Model(ABC):
+    @property
+    @abstractmethod
+    def mle_means(self):
+        raise NotImplementedError("Subclasses must implement this method.")
+    
     @abstractmethod
     def embedded_f(self, params, Y_C02):
         raise NotImplementedError("Subclasses must implement this method.")
@@ -171,6 +177,10 @@ class Model(ABC):
 class ModelConstant(Model):
     def __init__(self):
         super().__init__()
+        
+    @property
+    def mle_means(self):
+        return np.asarray([0.29114645, 0.74119171])
 
     def embedded_f(self, params, Y_C02):
         return params[1]
@@ -192,6 +202,10 @@ class ModelConstant(Model):
 class ModelLinear(Model):
     def __init__(self):
         super().__init__()
+        
+    @property
+    def mle_means(self):
+        return np.array([2.94178104e-01, 6.87592607e-01, 1.68976614e-04])
 
     def embedded_f(self, params, Y_C02):
         return params[1] + params[2] * Y_C02
@@ -213,6 +227,10 @@ class ModelLinear(Model):
 class ModelQuadratic(Model):
     def __init__(self):
         super().__init__()
+        
+    @property
+    def mle_means(self):
+        return np.array([4.31152764e-01, 9.36692705e-01, 1.67430852e-04, -4.31824348e-08])
 
     def embedded_f(self, params, Y_C02):
         return params[1] + params[2] * Y_C02 + params[3] * Y_C02 ** 2
@@ -231,24 +249,26 @@ class ModelQuadratic(Model):
         return "ModelQuadratic"
 
 
-def compute_mle(params):
+def compute_mle(model, params):
     """Compute the MAP estimate of the parameters."""
     # Compute the MAP estimate of the parameters
     def func(x):
-        alpha, f0, f1 = x
+        alpha, f0 = x[0:2]
         if alpha < 0 or alpha > 1:
             return 1e10
         if f0 < 0 or f0 > 1:
             return 1e10
-        l = min(-MODEL_T_LINEAR.log_likelihood(x), 1e10)
+        l = min(-model.log_likelihood(x), 1e10)
         if np.isnan(l):
             return 1e10
         return l
 
+    bounds_l = [0, 0, -0.005, -0.0001]
+    bounds_r = [1, 1, 0.005, 0.0001]
     res = optimize.minimize(
         func,
         params,
-        bounds=optimize.Bounds([0, 0, -0.005], [1, 1, 0.005], [True, True, True]),
+        bounds=optimize.Bounds(bounds_l[:model.num_params], bounds_r[:model.num_params], [True]*model.num_params),
         method="Nelder-Mead",
         tol=1e-12
     )

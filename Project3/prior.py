@@ -39,3 +39,7 @@ def prior(alpha, f0, f1):
     """
     # Validate input values
     return prior_alpha(alpha) + prior_f0(f0) + prior_f1(f1)
+
+
+def prior(model, params):
+    return sum(log_prior_normal(p, mean=mu, var=mu) for p, mu in zip(params, model.mle_means))
