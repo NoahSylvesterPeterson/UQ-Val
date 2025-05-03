@@ -24,7 +24,7 @@ def importance_sampling(model, num_samples=1000):
         if np.any(f < 0) or np.any(f > 1):
             continue
         log_prior = prior.prior(model, sample)
-        log_likelihood = model.log_likelihood(sample) + 2000
+        log_likelihood = model.log_likelihood(sample)
         log_posterior = log_prior + log_likelihood
         log_q = analytical_post.logpdf(sample)
         if not np.isfinite(log_q):
