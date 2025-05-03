@@ -66,7 +66,7 @@ class Model(ABC):
     @abstractmethod
     def mle_means(self):
         raise NotImplementedError("Subclasses must implement this method.")
-    
+
     @abstractmethod
     def embedded_f(self, params, Y_C02):
         raise NotImplementedError("Subclasses must implement this method.")
@@ -112,7 +112,8 @@ class Model(ABC):
         Returns the gradient of the model with respect to the parameters.
         """
         funcs = [self.dmodel_dalpha, self.dmodel_df0, self.dmodel_df1, self.dmodel_df2]
-        return np.column_stack([func(params, CO2) for func in funcs[:self.num_params]])
+        cols = [func(params, CO2) for func in funcs[:self.num_params]]
+        return np.column_stack(cols)
 
     @property
     @abstractmethod
@@ -137,12 +138,12 @@ class Model(ABC):
         """
         return STDDEV_T ** 2 + STDDEV_CO2 ** 2 * np.power(self.dmodel_dco2(params, CO2), 2)
 
-    def predict(self, params, CO2):
+    def predict(self, params, Y_CO2):
         """
         Returns the predicted temperature T for a given set of parameters.
         """
         return np.power((S / 4) * (1 - params[0]) / (Stefan_Boltzmann *
-                        (1 - 0.5 * self.embedded_f(params, CO2))), 0.25)
+                        (1 - 0.5 * self.embedded_f(params, np.asarray(Y_CO2)))), 0.25)
 
     def evaluate(self, params):
         """
@@ -153,8 +154,8 @@ class Model(ABC):
     def linear_model(self, params):
         params = np.asarray(params)
         grad_m = self.grad_params(params)
-        var_params = params
-        sigma_T_inv = np.diag(self.variance(params)**-1)
+        var_params = np.abs(params)
+        sigma_T_inv = np.diag(np.abs(self.variance(params))**-1)
         sigma_theta_inv = np.diag(var_params**-1)
         T_tilde = TEMPERATURE - (self.evaluate(params) - grad_m @ params)
         gamma = grad_m.T @ sigma_T_inv @ grad_m + sigma_theta_inv
@@ -177,13 +178,13 @@ class Model(ABC):
 class ModelConstant(Model):
     def __init__(self):
         super().__init__()
-        
+
     @property
     def mle_means(self):
         return np.asarray([0.29114645, 0.74119171])
 
     def embedded_f(self, params, Y_C02):
-        return params[1]
+        return params[1] * np.ones_like(Y_C02)
 
     def df_dco2(alpha, params, Y_C02):
         """
@@ -202,7 +203,7 @@ class ModelConstant(Model):
 class ModelLinear(Model):
     def __init__(self):
         super().__init__()
-        
+
     @property
     def mle_means(self):
         return np.array([2.94178104e-01, 6.87592607e-01, 1.68976614e-04])
@@ -227,7 +228,7 @@ class ModelLinear(Model):
 class ModelQuadratic(Model):
     def __init__(self):
         super().__init__()
-        
+
     @property
     def mle_means(self):
         return np.array([4.31152764e-01, 9.36692705e-01, 1.67430852e-04, -4.31824348e-08])
@@ -263,12 +264,12 @@ def compute_mle(model, params):
             return 1e10
         return l
 
-    bounds_l = [0, 0, -0.005, -0.0001]
-    bounds_r = [1, 1, 0.005, 0.0001]
+    bounds_l = [0, 0, -0.005, -2.5e-5]
+    bounds_r = [1, 1, 0.005, 2.5e-5]
     res = optimize.minimize(
         func,
         params,
-        bounds=optimize.Bounds(bounds_l[:model.num_params], bounds_r[:model.num_params], [True]*model.num_params),
+        bounds=optimize.Bounds(bounds_l[:model.num_params], bounds_r[:model.num_params], [True] * model.num_params),
         method="Nelder-Mead",
         tol=1e-12
     )

@@ -33,13 +33,12 @@ def prior_f2(f1):
     return log_prior_uniform(f1, -2.5e-5, 2.5e-5)
 
 
-def prior(alpha, f0, f1):
-    """
-    Returns the log of the prior probability distribution evaluated at alpha, f0, f1.
-    """
-    # Validate input values
-    return prior_alpha(alpha) + prior_f0(f0) + prior_f1(f1)
-
-
 def prior(model, params):
-    return sum(log_prior_normal(p, mean=mu, var=mu) for p, mu in zip(params, model.mle_means))
+    bounds = [
+        (0, 1),  # alpha
+        (0, 1),  # f0
+        (-0.005, 0.005),  # f1
+        (-2.5e-5, 2.5e-5)  # f2
+    ]
+    return sum(stats.truncnorm.logpdf(p, loc=mu, scale=np.sqrt(np.abs(mu)), a=(
+        b[0] - mu) / np.sqrt(np.abs(mu)), b=(b[1] - mu) / np.sqrt(np.abs(mu))) for p, mu, b in zip(params, model.mle_means, bounds))

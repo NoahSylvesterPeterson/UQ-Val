@@ -6,6 +6,7 @@ from emcee import EnsembleSampler, autocorr, moves
 import emcee
 import likelihood
 import prior
+import importance_sampling
 from scipy import stats, optimize
 from matplotlib import pyplot as plt
 import numpy as np
@@ -77,13 +78,13 @@ def plotter(chain, quant, xmin=None, xmax=None):
     plt.close()
 
 
-def sample_walkers(model, CO2, nsamples, flattened_chain):
-    CO2 = np.array([CO2]) if np.isscalar(CO2) else np.asarray(CO2)
-    models = np.zeros((nsamples, len(CO2)))
+def sample_walkers(model, Y_CO2, nsamples, flattened_chain):
+    Y_CO2 = np.array([Y_CO2]) if np.isscalar(Y_CO2) else np.asarray(Y_CO2)
+    models = np.zeros((nsamples, len(Y_CO2)))
     draw = np.floor(np.random.uniform(0, len(flattened_chain), size=nsamples)).astype(int)
     params = flattened_chain[draw]
     for i, param_set in enumerate(params):
-        models[i, :] = model.predict(param_set, CO2)
+        models[i, :] = model.predict(param_set, Y_CO2)
     spread = np.std(models, axis=0)
     med_model = np.median(models, axis=0)
     return med_model, spread, models
@@ -125,13 +126,13 @@ def main(model, lsqr_params):
     # initialize the Bayesian Calibration Procedure
     print("\nInitializing walkers")
     filename = "mcmc.h5"
-    nwalk = 100
+    nwalk = 6 * 24
     ndim = model.num_params
 
     # initial guesses for the walkers starting locations
     map_estimate = likelihood.compute_mle(model, likelihood.initial_guesses[:ndim]).x
 
-    params0 = np.tile(map_estimate, nwalk).reshape(nwalk, 3)
+    params0 = np.tile(map_estimate, nwalk).reshape(nwalk, ndim)
     params0[:, 0] += np.random.randn(nwalk) * 0.1 * map_estimate[0]    # Perturb alpha
     params0[:, 0] = np.clip(params0[:, 0], 0, 1)
     params0[:, 1] += np.random.randn(nwalk) * 0.1 * map_estimate[1]   # Perturb f0
@@ -148,7 +149,7 @@ def main(model, lsqr_params):
     backend = emcee.backends.HDFBackend(filename, name=f"{model}")
     backend.reset(nwalk, ndim)
 
-    with Pool(8) as pool:
+    with Pool(24) as pool:
         sampler = BayesianRichardsonExtrapolation(model=model)
         s = EnsembleSampler(nwalk, ndim, sampler, pool=pool, backend=backend, moves=[
             moves.DEMove(),
@@ -176,6 +177,7 @@ def main(model, lsqr_params):
                 if np.any(np.isnan(tau)):
                     print(f"step {step}  progress {step/(tau*50)} (acceptance fraction {s.acceptance_fraction.mean()})")
                     s.reset()
+                    step_size += 5000
                     print(f"not enough burn-in steps, resetting")
                     continue
 
@@ -343,8 +345,9 @@ def problem1b():
 
 def plot_analytical_calibration(model, nsample=100000):
     # Plot the analytical calibration
-    posterior: stats.rv_continuous = model.linear_model(likelihood.prior_means)
+    posterior: stats.rv_continuous = model.linear_model(model.mle_means)
     temp_chain = posterior.rvs(size=nsample)
+    print(temp_chain.shape)
     means = posterior.mean
     print(f"\nPosterior means: {means}")
     # FIGURE: Joint posterior(s)
@@ -381,10 +384,26 @@ if __name__ == '__main__':
     pd.set_option('display.max_rows', None)
     # print(read_data().head(81))
     # vis_data()
+    # for model in [likelihood.MODEL_T_CONSTANT, likelihood.MODEL_T_QUADRATIC, likelihood.MODEL_T_LINEAR]:
     for model in [likelihood.MODEL_T_CONSTANT, likelihood.MODEL_T_QUADRATIC, likelihood.MODEL_T_LINEAR]:
         analytical = model.linear_model(model.mle_means)
-        print(f"Prediction (linearized) for {model}: {model.predict(params, [717.0])}")
-        mcmc_means = main(model, params)
-        print(f"MCMC MAP for {model}: {mcmc_means}")
-    # plot_analytical_calibration(model)
+        sample_T = np.empty((10000,))
+        i = 0
+        while i < 10000:
+            sample = analytical.rvs(1)
+            if sample[0] < 0 or sample[0] > 1 or sample[1] < 0 or sample[1] > 1:
+                continue
+            f = model.embedded_f(sample, likelihood.CO2)
+            if np.any(f < 0) or np.any(f > 1):
+                continue
+            sample_T[i] = model.predict(sample, np.array([717.0]))[0]
+            i += 1
+        pred_T = np.mean(sample_T)
+        std_T = np.std(sample_T)
+        print(f"Prediction (linearized) for {model}: {model.predict(analytical.mean, [717.0])}")
+        print(f"Prediction from samples (linearized) for {model}: {pred_T} ± {2 * std_T} K")
+    # mcmc_means = main(likelihood.MODEL_T_LINEAR, analytical.mean)
+    # print(f"MCMC MAP for {model}: {mcmc_means}")
+    plot_analytical_calibration(model)
+    importance_sampling.compare_models()
     # print("MCMC final -log likelihood function: ", -model.log_likelihood(mean_params))
