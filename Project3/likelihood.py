@@ -156,7 +156,7 @@ class Model(ABC):
     def linear_model(self, params):
         params = np.asarray(params)
         grad_m = self.grad_params(params)
-        var_params = np.abs(params)
+        var_params = np.abs(params)**2
         sigma_T_inv = np.diag(np.abs(self.variance(params))**-1)
         sigma_theta_inv = np.diag(var_params**-1)
         T_tilde = TEMPERATURE - (self.evaluate(params) - grad_m @ params)

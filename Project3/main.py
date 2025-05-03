@@ -258,7 +258,7 @@ def main(model, lsqr_params):
                 ax.axhline(means[yi], color="r")
                 ax.plot(means[xi], means[yi], "sr")
 
-        plt.savefig('joint_post_corner.pdf', bbox_inches='tight')
+        plt.savefig('joint_post_corner.pdf', dpi=300, bbox_inches='tight')
         plt.close()
 
         # Make predictions
@@ -352,7 +352,7 @@ def plot_analytical_calibration(model, nsample=100000):
             ax.axhline(means[yi], color="r")
             ax.plot(means[xi], means[yi], "sr")
 
-    plt.savefig('analytical_joint_post_corner.pdf', bbox_inches='tight')
+    plt.savefig(f'analytical_joint_post_corner_{model}.pdf', dpi=300, bbox_inches='tight')
     plt.close()
 
 
