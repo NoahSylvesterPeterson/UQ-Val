@@ -32,8 +32,7 @@ def prior_k_trunc(model, k):
     bias = sigma_normal * (stats.norm.pdf(beta) - stats.norm.pdf(alpha)) / \
         (stats.norm.cdf(beta) - stats.norm.cdf(alpha))
     mu = mu_normal + bias
-    rv = stats.Normal(mu=mu, sigma=np.sqrt(np.abs(model.mle_means[k])))
-    return stats.truncate(rv, lb=bounds[k][0], ub=bounds[k][1])
+    return stats.truncnorm(a=alpha, b=beta, loc=mu, scale=sigma_normal)
 
 
 def prior_k(model, k):
