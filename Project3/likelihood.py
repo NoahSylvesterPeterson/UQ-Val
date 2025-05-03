@@ -164,7 +164,6 @@ class Model(ABC):
         sigma = np.linalg.inv(gamma)
         gammma_phi = grad_m.T @ sigma_T_inv @ T_tilde + sigma_theta_inv @ params
         phi = np.linalg.solve(gamma, gammma_phi)
-        print("Posterior mean: ", phi)
         return stats.multivariate_normal(mean=phi, cov=sigma, allow_singular=True)
 
     def log_likelihood(self, params):

@@ -295,7 +295,7 @@ def vis_data():
 
 
 def problem1a(alpha, f):
-    print(f"[bold]Problem 1a: For {alpha=}, {f=}, predicted T={likelihood.MODEL_T_CONSTANT.evaluate((alpha, f))}")
+    print(f"[bold]Problem 1a: For {alpha=}, {f=}, predicted T={likelihood.MODEL_T_CONSTANT.evaluate((alpha, f))[0]}")
 
 
 def problem1b():
