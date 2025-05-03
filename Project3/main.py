@@ -1,5 +1,4 @@
 #!/bin/py
-from matplotlib.ticker import FormatStrFormatter
 from multiprocessing import Pool
 from math import ceil, floor
 from emcee import EnsembleSampler, autocorr, moves
@@ -11,7 +10,6 @@ from scipy import stats, optimize
 from matplotlib import pyplot as plt
 import numpy as np
 from cmcrameri import cm
-import os
 import corner
 import pandas as pd
 from rich import print
@@ -37,12 +35,10 @@ plt.rcParams["font.size"] = 12
 # local files that will be imported
 
 # construct map of prior functions, to plot below
-priors = [prior.prior_alpha, prior.prior_f0, prior.prior_f1, prior.prior_f2]
 prior_names = ['alpha', 'f0', 'f1', 'f2']
-fdict = dict(zip(prior_names, priors))
 
 
-def plotter(chain, quant, xmin=None, xmax=None):
+def plotter(model, chain, quant, xmin=None, xmax=None):
     """subroutine that generates a .pdf file plotting a quantity"""
     bins = np.linspace(np.min(chain), np.max(chain), 200)
     qkde = stats.gaussian_kde(chain)
@@ -51,7 +47,7 @@ def plotter(chain, quant, xmin=None, xmax=None):
     fig, ax = plt.subplots(figsize=(6, 4), layout='constrained')
 
     # plot prior (requires some cleverness to do in general)
-    qpr = [fdict[quant](x) for x in bins]
+    qpr = [prior.prior_dists[f'{model}'][quant].logpdf(x) for x in bins]
     qpri = [np.exp(x) for x in qpr]
     qpri = qpri
     ax2 = plt.twinx(plt.gca())
@@ -120,6 +116,29 @@ def textual_boxplot(label, unordered, header):
                                       d.std()))
     # return d[[floor(1.*n/20), ceil(1.*n/20)]].mean(), d[[floor(17.*n/20), ceil(17.*n/20)]].mean()
     return d.mean(), 2 * d.std()
+
+
+def plot_model(model, T_true, T_std, Y_CO2, Y_CO2_std, samples, num_samples=10000, output_name='posterior.pdf'):
+    fig, ax = plt.subplots(figsize=(6, 4))
+    Y_CO2 = np.array([Y_CO2]) if np.isscalar(Y_CO2) else np.asarray(Y_CO2)
+    num_samples = min(num_samples, samples.shape[0] / 4)
+    T_m_pred_median, T_m_std, models = sample_walkers(model, Y_CO2, num_samples, samples)
+    T_m_pred_mean = np.mean(models, axis=0)
+    ax.errorbar(Y_CO2, T_true, yerr=2 * T_std, xerr=2 * Y_CO2_std, fmt='o', color='black',
+                markersize=5, label='Observed data with 2$\\sigma$ error bars', zorder=1)
+    plt.fill_between(
+        Y_CO2,
+        T_m_pred_median - 2 * T_m_std,
+        T_m_pred_median + 2 * T_m_std,
+        color='grey',
+        alpha=0.5,
+        label=r'$2\sigma$ Posterior Spread', zorder=2)
+    plt.plot(Y_CO2, T_m_pred_mean, color='orange', label='Posterior predictive mean', zorder=9)
+    ax.set_xlabel('CO2 concentration (ppm)')
+    ax.set_ylabel('Temperature (K)')
+    plt.legend()
+    plt.savefig(output_name, dpi=300, bbox_inches='tight')
+    plt.close()
 
 
 def main(model, lsqr_params):
@@ -193,7 +212,7 @@ def main(model, lsqr_params):
                 print(f"step {step}  progress {step/(tau*50)}")
 
         # final sampling
-        s.run_mcmc(pos, 4000, progress=True, tune=True)
+        s.run_mcmc(pos, 10000, progress=True, tune=True)
         print(f'{tau=}')
 
         print(f"Mean acceptance fraction was {s.acceptance_fraction.mean():.3f}")
@@ -211,7 +230,7 @@ def main(model, lsqr_params):
         # FIGURES: Marginal posterior(s)
         print("\nPrinting PDF output")
         for i in range(ndim):
-            plotter(flat_samples[:, i], prior_names[i])
+            plotter(model, flat_samples[:, i], prior_names[i])
 
         means = np.mean(flat_samples, axis=0)
         print(f"\nPosterior means: {means}")
@@ -250,58 +269,18 @@ def main(model, lsqr_params):
               val in zip(prior_names, max_likelihood_params)]))
         print(f"\tLog Probability: {s.flatlnprobability[best_i]}")
 
-        fig, ax = plt.subplots(figsize=(6, 4))
-        median, spread, models = sample_walkers(model, likelihood.CO2, 400, flat_samples)
-        mean = np.mean(models, axis=0)
-        print(spread)
-        plt.errorbar(likelihood.CO2, likelihood.TEMPERATURE, yerr=2 * likelihood.STDDEV_T, fmt='o', color='black',
-                     markersize=5, label='Observed data with 2$\\sigma$ error bars', zorder=1)
-        plt.fill_between(
+        plot_model(
+            model,
+            likelihood.TEMPERATURE,
+            likelihood.STDDEV_T,
             likelihood.CO2,
-            median - 2 * spread,
-            median + 2 * spread,
-            color='grey',
-            alpha=0.5,
-            label=r'$2\sigma$ Posterior Spread', zorder=2)
-        plt.plot(likelihood.CO2, mean, color='orange', label='Posterior predictive mean', zorder=10)
-        plt.plot(
-            likelihood.CO2,
-            model.evaluate(lsqr_params),
-            color='blue',
-            linestyle='--',
-            label='Least squares model', zorder=9)
-        plt.xlabel('CO2 concentration (ppm)')
-        plt.ylabel('Temperature (K)')
-        plt.legend()
-        plt.savefig('posterior.pdf', bbox_inches='tight')
-        plt.close()
-
-        fig, ax = plt.subplots(figsize=(6, 4))
-        plt.fill_between(
-            likelihood.CO2,
-            median - 2 * spread,
-            median + 2 * spread,
-            color='grey',
-            alpha=0.5,
-            label=r'$2\sigma$ Posterior Spread')
-        plt.errorbar(likelihood.CO2, likelihood.TEMPERATURE, yerr=2 * likelihood.STDDEV_T, fmt='o', color='black',
-                     markersize=5, label='Observed data with 2$\\sigma$ error bars', zorder=1)
-        plt.plot(
-            likelihood.CO2,
-            model.evaluate(lsqr_params),
-            color='blue',
-            linestyle='--',
-            label='Least squares model', zorder=9)
-        plt.plot(likelihood.CO2, best_fit_model, color='orange', label='Highest likelihood model', zorder=10)
-        plt.xlabel('CO2 concentration (ppm)')
-        plt.ylabel('Temperature (K)')
-        # plt.title('Posterior predictive distribution', fontsize=16)
-        plt.legend()
-        plt.savefig('posterior_best_fit.pdf', bbox_inches='tight')
-        plt.close()
+            likelihood.STDDEV_CO2,
+            flat_samples,
+            output_name='posterior.pdf')
 
         pred_CO2 = [717.0]
-        pred_T, stdev_T, models_T = sample_walkers(model, pred_CO2, 400, flat_samples)
+        num_samples = min(10000, flat_samples.shape[0] / 4)
+        pred_T, stdev_T, models_T = sample_walkers(model, pred_CO2, num_samples, flat_samples)
         pred_T_mean = np.mean(models_T, axis=0)
         print(f"Predicted temperature for CO2 concentration {pred_CO2} ppm:\n")
         print(f"\tMedian: {pred_T[0]:.6g} ± {2*stdev_T[0]:.6g} K")
@@ -346,14 +325,13 @@ def problem1b():
 def plot_analytical_calibration(model, nsample=100000):
     # Plot the analytical calibration
     posterior: stats.rv_continuous = model.linear_model(model.mle_means)
-    temp_chain = posterior.rvs(size=nsample)
-    print(temp_chain.shape)
-    means = posterior.mean
-    print(f"\nPosterior means: {means}")
+    samples = posterior.rvs(nsample)
+    means = np.mean(samples, axis=0)
+    print(f"\nPosterior means: {means} (sampled), {posterior.mean} (exact)")
     # FIGURE: Joint posterior(s)
     full_labels = ["$\\alpha$", "$f_0$", "$f_1$", "$f_2$"]
     figure = corner.corner(
-        temp_chain,
+        samples,
         labels=full_labels[:model.num_params],
         quantiles=[0.16, 0.5, 0.84],
         show_titles=True,
@@ -391,8 +369,9 @@ if __name__ == '__main__':
         i = 0
         while i < 10000:
             sample = analytical.rvs(1)
-            if sample[0] < 0 or sample[0] > 1 or sample[1] < 0 or sample[1] > 1:
-                continue
+            for j, p in enumerate(sample):
+                if prior.bounds[j][0] > p or p > prior.bounds[j][1]:
+                    continue
             f = model.embedded_f(sample, likelihood.CO2)
             if np.any(f < 0) or np.any(f > 1):
                 continue
@@ -402,8 +381,8 @@ if __name__ == '__main__':
         std_T = np.std(sample_T)
         print(f"Prediction (linearized) for {model}: {model.predict(analytical.mean, [717.0])}")
         print(f"Prediction from samples (linearized) for {model}: {pred_T} ± {2 * std_T} K")
-    # mcmc_means = main(likelihood.MODEL_T_LINEAR, analytical.mean)
-    # print(f"MCMC MAP for {model}: {mcmc_means}")
     plot_analytical_calibration(model)
+    mcmc_means = main(likelihood.MODEL_T_LINEAR, analytical.mean)
+    print(f"MCMC MAP for {model}: {mcmc_means}")
     importance_sampling.compare_models()
     # print("MCMC final -log likelihood function: ", -model.log_likelihood(mean_params))

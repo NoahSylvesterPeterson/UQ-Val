@@ -1,5 +1,8 @@
 import numpy as np
 import scipy.stats as stats
+from likelihood import MODEL_T_CONSTANT, MODEL_T_LINEAR, MODEL_T_QUADRATIC
+from rich.traceback import install
+install(show_locals=True)
 
 
 def log_prior_normal(x, mean, var):
@@ -13,32 +16,51 @@ def log_prior_uniform(x, low, high):
         return -np.inf
 
 
-def prior_alpha(alpha):
-    return log_prior_normal(alpha, mean=2.94230780e-01, var=2.94230780e-01**2)
-    # return stats.beta.logpdf(alpha, a=2, b=2)
-    # return log_prior_uniform(alpha, 0, 1)
+bounds = [
+    (0, 1),  # alpha
+    (0, 1),  # f0
+    (-0.003, 0.003),  # f1
+    (-9e-6, 9e-6)  # f2
+]
 
 
-def prior_f0(f0):
-    return log_prior_normal(f0, mean=6.87644595e-01, var=6.87644595e-01**2)
-    # return log_prior_uniform(f0, 0, 1)
+def prior_k_trunc(model, k):
+    mu_normal = model.mle_means[k]
+    sigma_normal = np.sqrt(np.abs(model.mle_means[k]))
+    alpha = (bounds[k][0] - mu_normal) / sigma_normal
+    beta = (bounds[k][1] - mu_normal) / sigma_normal
+    bias = sigma_normal * (stats.norm.pdf(beta) - stats.norm.pdf(alpha)) / \
+        (stats.norm.cdf(beta) - stats.norm.cdf(alpha))
+    mu = mu_normal + bias
+    rv = stats.Normal(mu=mu, sigma=np.sqrt(np.abs(model.mle_means[k])))
+    return stats.truncate(rv, lb=bounds[k][0], ub=bounds[k][1])
 
 
-def prior_f1(f1):
-    return log_prior_normal(f1, mean=1.69095166e-04, var=1.69095166e-04**2)
-    # return log_prior_uniform(f1, -0.005, 0.005)
+def prior_k(model, k):
+    rv = stats.Normal(mu=model.mle_means[k], sigma=np.sqrt(np.abs(model.mle_means[k])))
+    return rv
 
 
-def prior_f2(f1):
-    return log_prior_uniform(f1, -2.5e-5, 2.5e-5)
+prior_dists = {
+    "ModelConstant": {
+        "alpha": prior_k_trunc(MODEL_T_CONSTANT, 0),
+        "f0": prior_k(MODEL_T_CONSTANT, 1),
+    },
+    "ModelLinear": {
+        "alpha": prior_k_trunc(MODEL_T_LINEAR, 0),
+        "f0": prior_k(MODEL_T_LINEAR, 1),
+        "f1": prior_k(MODEL_T_LINEAR, 2),
+    },
+    "ModelQuadratic": {
+        "alpha": prior_k_trunc(MODEL_T_QUADRATIC, 0),
+        "f0": prior_k(MODEL_T_QUADRATIC, 1),
+        "f1": prior_k(MODEL_T_QUADRATIC, 2),
+        "f2": prior_k(MODEL_T_QUADRATIC, 3),
+    },
+}
 
 
 def prior(model, params):
-    bounds = [
-        (0, 1),  # alpha
-        (0, 1),  # f0
-        (-0.005, 0.005),  # f1
-        (-2.5e-5, 2.5e-5)  # f2
-    ]
-    return sum(stats.truncnorm.logpdf(p, loc=mu, scale=np.sqrt(np.abs(mu)), a=(
-        b[0] - mu) / np.sqrt(np.abs(mu)), b=(b[1] - mu) / np.sqrt(np.abs(mu))) for p, mu, b in zip(params, model.mle_means, bounds))
+    dists = prior_dists[f'{model}']
+    param_names = ['alpha', 'f0', 'f1', 'f2']
+    return sum(dists[k].logpdf(params[i]) for i, k in enumerate(param_names[:len(params)]))

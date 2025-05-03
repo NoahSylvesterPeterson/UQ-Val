@@ -3,6 +3,8 @@ from scipy.constants import Stefan_Boltzmann
 import pandas as pd
 from scipy import stats, optimize
 from abc import ABC, abstractmethod
+from rich.traceback import install
+install(show_locals=True)
 
 S = 1370  # W/m^2
 R = 6.38e6  # m
@@ -142,8 +144,8 @@ class Model(ABC):
         """
         Returns the predicted temperature T for a given set of parameters.
         """
-        return np.power((S / 4) * (1 - params[0]) / (Stefan_Boltzmann *
-                        (1 - 0.5 * self.embedded_f(params, np.asarray(Y_CO2)))), 0.25)
+        return np.power(np.abs((S / 4) * (1 - params[0]) / (Stefan_Boltzmann *
+                        (1 - 0.5 * self.embedded_f(params, np.asarray(Y_CO2))))), 0.25)
 
     def evaluate(self, params):
         """
@@ -171,6 +173,8 @@ class Model(ABC):
         """
         f = self.embedded_f(params, CO2)
         if np.any(f < 0) or np.any(f > 1):
+            return -np.inf
+        if params[0] < 0 or params[0] > 1:
             return -np.inf
         return np.sum(norm_logpdf(self.evaluate(params), TEMPERATURE, self.variance(params)))
 

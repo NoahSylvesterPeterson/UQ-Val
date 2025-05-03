@@ -1,9 +1,8 @@
-import emcee
-from scipy import stats
 import numpy as np
 import likelihood
 import prior
-from functools import reduce
+from rich.traceback import install
+install(show_locals=True)
 
 
 def importance_sampling(model, num_samples=1000):
@@ -18,11 +17,9 @@ def importance_sampling(model, num_samples=1000):
     i = 0
     while i < num_samples:
         sample = analytical_post.rvs(1)
-        if sample[0] < 0 or sample[0] > 1:
-            continue
-        f = model.embedded_f(sample, likelihood.CO2)
-        if np.any(f < 0) or np.any(f > 1):
-            continue
+        # for j, p in enumerate(sample):
+        #     if prior.bounds[j][0] > p or p > prior.bounds[j][1]:
+        #         continue
         log_prior = prior.prior(model, sample)
         log_likelihood = model.log_likelihood(sample)
         log_posterior = log_prior + log_likelihood
@@ -30,7 +27,7 @@ def importance_sampling(model, num_samples=1000):
         if not np.isfinite(log_q):
             continue
         log_posterior -= log_q
-        weights[i] = np.exp(log_posterior)
+        weights[i] = np.exp(log_posterior) if np.isfinite(log_posterior) else 0.0
         i += 1
     evidence = np.sum(weights) / num_samples
     return evidence
@@ -39,5 +36,5 @@ def importance_sampling(model, num_samples=1000):
 def compare_models():
     for model in [likelihood.ModelConstant(), likelihood.ModelLinear(), likelihood.ModelQuadratic()]:
         # Calculate the importance sampling evidence
-        evidence = importance_sampling(model, num_samples=1000)
+        evidence = importance_sampling(model, num_samples=10000)
         print(f"Model: {model}, Evidence: {evidence}")
